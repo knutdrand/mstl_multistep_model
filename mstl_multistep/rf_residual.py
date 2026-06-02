@@ -29,6 +29,7 @@ from statsforecast.models import AutoARIMA
 
 from mstl_multistep import decomposition as dec
 from mstl_multistep.features import INDEX_COLS, build_model_features
+from mstl_multistep.irs_features import build_irs_features
 from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
 from mstl_multistep.run_config import RunConfig
 
@@ -112,6 +113,13 @@ class ArimaBaseRFResidualModel:
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
         )
+        if cfg.irs_column and cfg.irs_features:
+            irs, irs_cols = build_irs_features(
+                historic_df, None, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
+            )
+            feats = feats.merge(irs, on=INDEX_COLS, how="left")
+            for c in irs_cols:
+                feats[c] = feats[c].fillna(0.0)
         self._feat_cols = [c for c in feats.columns if c not in INDEX_COLS]
 
         deseason = deseason.copy()
@@ -173,6 +181,11 @@ class ArimaBaseRFResidualModel:
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
         )
+        if cfg.irs_column and cfg.irs_features:
+            irs, _ = build_irs_features(
+                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
+            )
+            feats_all = feats_all.merge(irs, on=INDEX_COLS, how="left")
         feats_all = feats_all.reindex(columns=INDEX_COLS + self._feat_cols, fill_value=0.0)
         feats_all["_ts"] = feats_all["time_period"].apply(lambda p: period_to_timestamp(p, freq))
 

@@ -80,6 +80,15 @@ class RunConfig(BaseModel):
     arima_stepwise: bool = True
     arima_level: int = 68
 
+    # IRS allocation feature extraction (rf_residual mode). When ``irs_column`` is
+    # set and ``irs_features`` is non-empty, dense protective-effect features are
+    # engineered from the raw (sparse) allocation column and added to the RF at
+    # lag 0 — see :mod:`mstl_multistep.irs_features`. ``irs_halflife`` controls the
+    # geometric decay (in months) of the ``decay`` feature.
+    irs_column: str | None = None
+    irs_features: list[str] = Field(default_factory=list)
+    irs_halflife: float = 4.0
+
     # Output post-processing
     discretize_samples: bool = False
     random_seed: int = 42
