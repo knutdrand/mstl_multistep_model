@@ -156,10 +156,26 @@ classical MSTL+ARIMA.**
 | CRPS / MAE | 83.3 / 113.1 |
 | coverage 10–90 / 25–75 | 0.757 / 0.477 (nominal 0.80 / 0.50) |
 
-Runs across all 406 series and is the best-calibrated of the three datasets —
-the larger panel gives the ARIMA base more signal. The list-form
-`deseasonalize_covariates` keeps the seasonal `sprayed_*` intervention flags raw
-while deseasonalizing climate. (No classical baseline run on this dataset yet.)
+Best-calibrated of the three datasets — the larger panel gives the ARIMA base
+more signal. The list-form `deseasonalize_covariates` keeps the seasonal
+`sprayed_*` intervention flags raw while deseasonalizing climate.
+
+Leaderboard vs every other model previously run on this dataset (MLflow,
+identical 12×3×1 backtest and dataset hash `2aa64188`):
+
+| Model | log-CRPS |
+|---|---|
+| **`rf_residual` (this model)** | **0.3258** |
+| `mstl_arima` | 0.3304 |
+| `mstl_arimax` | 0.3331 |
+| `mstl_nhits` | 0.3430 |
+| `mstl_arima_residual` | 0.3443 |
+| `joint_structural` (best) | 0.3649 |
+| `chtorch` (best) | 0.3918 |
+
+`rf_residual` has the best log-CRPS of all models tried here. (`chap_pymc` 0.378
+and `simple_multistep` 0.377 ran on a different dataset version, hash
+`ffe9ffaa`, so are excluded as not directly comparable.)
 
 ## Running standalone
 
