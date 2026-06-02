@@ -185,7 +185,7 @@ def test_deseasonalized_covariates(prob_model):
     historic, future = _split(df, horizon=3)
     cfg = RunConfig(
         prob_model=prob_model,
-        deseasonalize_covariates=True,
+        deseasonalize_covariates=["rainfall"],
         n_samples=20,
         n_target_lags=4,
         rf={"n_estimators": 40, "random_state": 0},
@@ -196,6 +196,26 @@ def test_deseasonalized_covariates(prob_model):
     assert len(preds) == len(future)
     vals = preds.filter(like="sample_").to_numpy()
     assert np.isfinite(vals).all() and (vals >= 0).all()
+
+
+def test_build_model_features_deseasonalizes_only_listed_cols():
+    """Listed covariate loses its seasonal cycle; an unlisted one keeps it."""
+    from mstl_multistep.features import build_model_features
+
+    df = _synthetic_panel(n_locations=1, n_months=72).copy()
+    t = np.arange(len(df))
+    df["clim"] = 10 * np.sin(2 * np.pi * t / 12)   # pure seasonal
+    df["spray"] = 10 * np.sin(2 * np.pi * t / 12)   # identical, but kept raw
+
+    feats = build_model_features(
+        df, None, ["clim", "spray"], "MS", [12],
+        min_lag=1, max_lag=1, use_location_dummies=False, deseasonalize_cols=["clim"],
+    )
+    # clim_lag1 should be flattened (anomalies ~0); spray_lag1 keeps full amplitude
+    clim_amp = np.nanmax(np.abs(feats["clim_lag1"].to_numpy()))
+    spray_amp = np.nanmax(np.abs(feats["spray_lag1"].to_numpy()))
+    assert clim_amp < 2.0
+    assert spray_amp > 5.0
 
 
 def test_deseasonalize_covariates_removes_seasonal_cycle():

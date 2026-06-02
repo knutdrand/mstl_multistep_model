@@ -107,7 +107,7 @@ def build_configs():
             prob_model=d["prob_model"],
             n_target_lags=d["n_target_lags"],
             log_transform=True,
-            deseasonalize_covariates=True,
+            deseasonalize_covariates=COVARIATES,
             n_samples=100,
             feature_min_lag=1,
             feature_max_lag=3,

@@ -1,21 +1,23 @@
 additional_continuous_covariates:
-  - rainfall
+  - rainfall_era5
   - mean_temperature
-  - mean_relative_humidity
+  - relative_humidity
+  - sprayed_this_season
+  - sprayed_last_season
 user_option_values:
-  prob_model: arima_residual
+  prob_model: rf_residual
   target_variable: disease_cases
   log_transform: true
   season_length_monthly: 12
-  n_target_lags: 6
   n_samples: 100
   feature_min_lag: 1
   feature_max_lag: 3
-  deseasonalize_covariates:
-    - rainfall
+  deseasonalize_covariates:         # climate only; keep seasonal sprayed_* raw
+    - rainfall_era5
     - mean_temperature
-    - mean_relative_humidity
+    - relative_humidity
   arima_stepwise: true
+  arima_approximation: true         # 406 locations -> speed up AutoARIMA
   arima_level: 68
   rf:
     n_estimators: 200

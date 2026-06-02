@@ -11,7 +11,10 @@ user_option_values:
   n_samples: 100
   feature_min_lag: 1
   feature_max_lag: 3
-  deseasonalize_covariates: true
+  deseasonalize_covariates:
+    - rainfall
+    - mean_temperature
+    - mean_relative_humidity
   arima_stepwise: true
   arima_level: 68
   rf:

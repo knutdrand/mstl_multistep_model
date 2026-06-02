@@ -58,6 +58,9 @@ user_option_values:
   prob_wrapper: bootstrap                   # bootstrap | cross-conformal | bucketedresidual
   min_bucket_size: 5                        # only for bucketedresidual
   use_location_dummies: true                # keep per-series identity in the pooled model
+  deseasonalize_covariates:                 # covariate names to MSTL-deseasonalize
+    - rainfall                              # (others kept raw — e.g. list climate but
+    - mean_temperature                      #  not seasonal sprayed_* intervention flags)
   discretize_samples: false
   random_seed: 42
   rf:

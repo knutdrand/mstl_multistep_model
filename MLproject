@@ -88,9 +88,10 @@ user_options:
     title: Add one-hot location columns so the pooled model keeps per-series identity
     type: boolean
   deseasonalize_covariates:
-    default: true
-    title: MSTL-deseasonalize covariates so the RF sees climate anomalies
-    type: boolean
+    default: []
+    title: Covariate names to MSTL-deseasonalize (others kept raw; e.g. climate yes, sprayed_* no)
+    type: array
+    items: {type: string}
   discretize_samples:
     default: false
     title: Poisson-resample expected counts for count discreteness

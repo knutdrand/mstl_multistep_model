@@ -66,25 +66,28 @@ def build_model_features(
     min_lag: int,
     max_lag: int,
     use_location_dummies: bool,
-    deseasonalize_covariates: bool,
+    deseasonalize_cols: list[str],
 ) -> pd.DataFrame:
     """Build features for fit (``future_df=None``) or predict (future provided).
 
-    When ``deseasonalize_covariates`` is set and the data actually carries
-    covariates, the covariate columns are MSTL-deseasonalized first (so the RF
-    sees climate *anomalies*, matching the deseasonalized target); otherwise the
-    raw columns are lagged as-is.
+    Covariates named in ``deseasonalize_cols`` are MSTL-deseasonalized first (so
+    the model sees their anomalies, matching the deseasonalized target); all
+    other covariates are lagged as-is. This lets climate be deseasonalized while
+    seasonal intervention indicators (e.g. ``sprayed_*``) stay raw.
     """
-    has_cov = any(c in historic_df.columns for c in feature_columns)
-    if deseasonalize_covariates and has_cov:
+    base = historic_df if future_df is None else pd.concat(
+        [historic_df, future_df], ignore_index=True
+    )
+    present = [c for c in feature_columns if c in base.columns]
+    source = base[INDEX_COLS + present].copy()
+
+    to_deseason = [c for c in deseasonalize_cols if c in present]
+    if to_deseason:
         from mstl_multistep import decomposition as dec
 
-        source = dec.deseasonalize_covariates(
-            historic_df, future_df, freq, feature_columns, season_lengths
+        des = dec.deseasonalize_covariates(
+            historic_df, future_df, freq, to_deseason, season_lengths
         )
-    elif future_df is None:
-        source = historic_df
-    else:
-        source = pd.concat([historic_df, future_df], ignore_index=True)
+        source = source.drop(columns=to_deseason).merge(des, on=INDEX_COLS, how="left")
 
     return build_features(source, feature_columns, min_lag, max_lag, use_location_dummies)

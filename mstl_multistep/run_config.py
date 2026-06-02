@@ -52,9 +52,12 @@ class RunConfig(BaseModel):
     feature_min_lag: int = 1
     feature_max_lag: int = 3
     use_location_dummies: bool = True
-    # MSTL-deseasonalize the covariates before lagging, so the RF sees climate
-    # anomalies (matching the deseasonalized target) rather than raw seasonal series.
-    deseasonalize_covariates: bool = True
+    # Names of covariates to MSTL-deseasonalize before lagging, so the model sees
+    # their anomalies (matching the deseasonalized target) rather than the raw
+    # seasonal series. Covariates not listed are passed through raw — e.g. keep
+    # seasonal intervention indicators (sprayed_*) raw while deseasonalizing
+    # climate. Names not present in the data are ignored.
+    deseasonalize_covariates: list[str] = Field(default_factory=list)
 
     # How the deseasonalized series is forecast probabilistically:
     #   "multistep"          -> recursive RF from simple_multistep_model + prob_wrapper
