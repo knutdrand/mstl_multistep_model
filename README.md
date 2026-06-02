@@ -145,6 +145,22 @@ the better base for these AR/seasonal series; RF adds the nonlinear
 climate-anomaly correction a univariate ARIMA can't — together they edge out
 classical MSTL+ARIMA.**
 
+## Benchmark — level-5 spray dataset (406 locations, with intervention covariates)
+
+`rf_residual` with climate (deseasonalized) + raw `sprayed_this_season` /
+`sprayed_last_season` (`config_spray.yaml`):
+
+| metric | value |
+|---|---|
+| log-CRPS | 0.326 |
+| CRPS / MAE | 83.3 / 113.1 |
+| coverage 10–90 / 25–75 | 0.757 / 0.477 (nominal 0.80 / 0.50) |
+
+Runs across all 406 series and is the best-calibrated of the three datasets —
+the larger panel gives the ARIMA base more signal. The list-form
+`deseasonalize_covariates` keeps the seasonal `sprayed_*` intervention flags raw
+while deseasonalizing climate. (No classical baseline run on this dataset yet.)
+
 ## Running standalone
 
 ```bash
