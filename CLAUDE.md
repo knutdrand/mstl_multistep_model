@@ -23,5 +23,6 @@ Chap-compatible CSVs live at `/Users/knutdr/Data/CH/`:
 
 ## Dependency note
 
-`simple_multistep_model` is a uv path dependency (`../simple_multistep_model`).
-Keep the two repos as siblings.
+`simple_multistep_model` is a uv git dependency pinned to a commit in
+`pyproject.toml` (`github.com/knutdrand/simple_multistep_model`), so no local
+checkout is required. Bump the pinned `rev` to pick up upstream changes.

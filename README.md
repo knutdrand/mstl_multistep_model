@@ -27,14 +27,9 @@ few target lags handles well even on short series.
 
 ## Installation
 
-This project uses [uv](https://docs.astral.sh/uv/) and depends on its sibling
-`simple_multistep_model` via a path dependency. Clone both side by side:
-
-```
-Sources/
-  simple_multistep_model/
-  mstl_multistep_model/      <- this repo
-```
+This project uses [uv](https://docs.astral.sh/uv/). The trend model
+`simple_multistep_model` is pulled directly from GitHub (pinned to a commit in
+`pyproject.toml`), so no sibling checkout is needed:
 
 ```bash
 uv sync

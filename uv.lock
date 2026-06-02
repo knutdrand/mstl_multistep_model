@@ -673,7 +673,7 @@ wheels = [
 
 [[package]]
 name = "mstl-multistep-model"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "mapie" },
@@ -705,7 +705,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "scikit-learn" },
-    { name = "simple-multistep-model", editable = "../simple_multistep_model" },
+    { name = "simple-multistep-model", git = "https://github.com/knutdrand/simple_multistep_model?rev=719e7aee8495590600c3b9812eb446de35218e37" },
     { name = "skpro" },
     { name = "statsforecast", specifier = ">=1.7" },
     { name = "xarray" },
@@ -1626,7 +1626,7 @@ wheels = [
 [[package]]
 name = "simple-multistep-model"
 version = "0.1.0"
-source = { editable = "../simple_multistep_model" }
+source = { git = "https://github.com/knutdrand/simple_multistep_model?rev=719e7aee8495590600c3b9812eb446de35218e37#719e7aee8495590600c3b9812eb446de35218e37" }
 dependencies = [
     { name = "cyclopts" },
     { name = "mapie" },
@@ -1642,23 +1642,6 @@ dependencies = [
     { name = "xarray", version = "2025.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "xarray", version = "2026.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "cyclopts" },
-    { name = "mapie", specifier = ">=1.3.0" },
-    { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pydantic", specifier = ">=2.13.3" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "scikit-learn" },
-    { name = "skpro" },
-    { name = "xarray" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
 
 [[package]]
 name = "six"

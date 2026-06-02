@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mstl_multistep_model"
-version = "0.1.0"
+version = "0.1.1"
 description = "MSTL decomposition with a simple recursive multistep model as the trend/remainder forecaster, for CHAP"
 requires-python = ">=3.10"
 dependencies = [
@@ -21,11 +21,11 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# The trend model is reused verbatim from the sibling repo. An ABSOLUTE path is
-# required because `chap eval` copies this project into a `runs/<ts>/` subdir and
-# runs uv from there, which would break a relative `../` source. Collaborators
-# should point this at their own checkout of simple_multistep_model.
-simple_multistep_model = { path = "/Users/knutdr/Sources/simple_multistep_model", editable = true }
+# The trend model is reused verbatim from the sibling repo, pinned to an exact
+# commit for reproducibility. A git source (rather than a local path) is what
+# makes this repo clonable by others and survives `chap eval` copying the project
+# into a `runs/<ts>/` subdir (a relative path source would break there).
+simple_multistep_model = { git = "https://github.com/knutdrand/simple_multistep_model", rev = "719e7aee8495590600c3b9812eb446de35218e37" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["mstl_multistep"]
