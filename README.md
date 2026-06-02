@@ -88,6 +88,29 @@ chap eval \
 
 (`--run-config.track` records the run to MLflow — see the global CLAUDE.md.)
 
+## Two probabilistic modes
+
+`prob_model` selects how the deseasonalized series is forecast:
+
+- `multistep` (default) — the recursive RF from `simple_multistep_model` with a
+  `prob_wrapper` (`bootstrap` / `cross-conformal` / `bucketedresidual`).
+- `arima_residual` — a **deterministic** RF point forecast plus **AutoARIMA on
+  the RF out-of-bag residuals**. ARIMA supplies horizon-growing predictive
+  variance, which the recursive bootstrap badly underestimates. This is the
+  inverse of chap_nixtla's `mstl_arima_residual` (ARIMA base + neural residual).
+
+## Benchmark (Lao admin1 monthly, 12 splits × h=3, tracked to MLflow)
+
+| Model | log-CRPS | CRPS | MAE | cov 10–90 |
+|---|---|---|---|---|
+| `multistep` (RF+bootstrap) | 0.924 | 76.5 | 79.2 | 0.066 |
+| `arima_residual` (RF→ARIMA) | 0.766 | 60.7 | 76.4 | 0.484 |
+| chap_nixtla `mstl_arima` (baseline) | 0.662 | 53.4 | 68.3 | 0.580 |
+
+The `arima_residual` mode fixes the severe under-dispersion of the bootstrap
+mode (coverage 0.066 → 0.484) and improves log-CRPS, but does not yet beat the
+classical MSTL+ARIMA baseline.
+
 ## Running standalone
 
 ```bash
