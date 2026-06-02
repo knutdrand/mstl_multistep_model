@@ -78,6 +78,23 @@ def test_fit_predict_with_covariates():
 
 
 @pytest.mark.parametrize("covariates", [[], ["rainfall"]])
+def test_rf_residual_fit_predict(covariates):
+    df = _synthetic_panel(n_months=72)
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(
+        prob_model="rf_residual",
+        n_samples=25,
+        rf={"n_estimators": 40, "random_state": 0},
+    )
+    model = build_chap_model(cfg, feature_columns=covariates)
+    model.fit(historic)
+    preds = model.predict(historic, future)
+    assert len(preds) == len(future)
+    vals = preds.filter(like="sample_").to_numpy()
+    assert np.isfinite(vals).all() and (vals >= 0).all()
+
+
+@pytest.mark.parametrize("covariates", [[], ["rainfall"]])
 def test_recursive_residual_fit_predict(covariates):
     df = _synthetic_panel(n_months=72)
     historic, future = _split(df, horizon=3)

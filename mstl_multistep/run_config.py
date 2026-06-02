@@ -61,7 +61,12 @@ class RunConfig(BaseModel):
     #   "arima_residual"     -> deterministic RF point + AutoARIMA on one-step OOB residuals
     #   "recursive_residual" -> RF point with one-step OOB residuals resampled and
     #                           compounded through the recursion (variance grows with horizon)
-    prob_model: Literal["multistep", "arima_residual", "recursive_residual"] = "multistep"
+    #   "rf_residual"        -> ARIMA base (mean + sigma) with RF modelling the ARIMA
+    #                           residual as a deterministic point correction (mirror of
+    #                           arima_residual)
+    prob_model: Literal[
+        "multistep", "arima_residual", "recursive_residual", "rf_residual"
+    ] = "multistep"
 
     # multistep-only
     prob_wrapper: ProbWrapper = "bootstrap"

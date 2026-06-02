@@ -235,4 +235,8 @@ def build_chap_model(cfg: RunConfig, feature_columns: list[str]):
         from mstl_multistep.arima_residual import MSTLArimaResidualModel
 
         return MSTLArimaResidualModel(cfg, feature_columns)
+    if cfg.prob_model == "rf_residual":
+        from mstl_multistep.rf_residual import ArimaBaseRFResidualModel
+
+        return ArimaBaseRFResidualModel(cfg, feature_columns)
     return MSTLMultistepModel(cfg, feature_columns)

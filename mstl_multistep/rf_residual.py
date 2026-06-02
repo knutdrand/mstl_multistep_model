@@ -1,0 +1,215 @@
+"""MSTL → ARIMA base → RandomForest-on-residual hybrid.
+
+The mirror of :mod:`mstl_multistep.arima_residual`: here **AutoARIMA is the
+base** forecaster on the MSTL-deseasonalized series (it carries the
+autoregressive dynamics *and* the predictive uncertainty), and a
+**RandomForest models the ARIMA residual** as a deterministic point correction,
+exploiting nonlinear / climate-anomaly structure the univariate ARIMA cannot.
+
+Reconstruction (log1p space when ``log_transform``)::
+
+    final = seasonal_naive + ARIMA_draws(mu_h, sigma_h) + RF_residual_point
+
+ARIMA supplies the spread (``sigma_h`` grows with horizon); RF nudges the mean
+using lagged climate anomalies and location identity. ARIMA's in-sample
+residuals are well-behaved (unlike RF's, which is why the inverse mode needs
+OOB), so no out-of-bag trick is required here — RF's forecast on the unseen
+future feature rows is genuinely out-of-sample.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import numpy as np
+import pandas as pd
+from scipy.stats import norm
+from sklearn.ensemble import RandomForestRegressor
+from statsforecast.models import AutoARIMA
+
+from mstl_multistep import decomposition as dec
+from mstl_multistep.features import INDEX_COLS, build_model_features
+from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
+from mstl_multistep.run_config import RunConfig
+
+logger = logging.getLogger(__name__)
+
+
+class ArimaBaseRFResidualModel:
+    def __init__(self, cfg: RunConfig, feature_columns: list[str]):
+        self.cfg = cfg
+        self.feature_columns = list(feature_columns)
+        self._rf: RandomForestRegressor | None = None
+        self._feat_cols: list[str] | None = None
+        self._freq: str | None = None
+        self._season_lengths: list[int] | None = None
+
+    def _season_lengths_for(self, freq: str) -> list[int]:
+        sl = (
+            self.cfg.season_length_weekly
+            if freq.startswith("W")
+            else self.cfg.season_length_monthly
+        )
+        return [int(sl)]
+
+    def _arima(self, y: np.ndarray, h: int, want_fitted: bool):
+        """Return (fitted, mean, sigma) from AutoARIMA on a deseasonalized series.
+
+        ``y`` must be finite (caller interpolates). Falls back to a constant
+        mean model on failure so fit-time residuals and predict-time forecasts
+        stay mutually consistent.
+        """
+        cfg = self.cfg
+        z = norm.ppf(0.5 + cfg.arima_level / 200.0)
+        h = max(int(h), 1)
+        try:
+            model = AutoARIMA(
+                season_length=1,  # the series is already deseasonalized
+                approximation=cfg.arima_approximation,
+                stepwise=cfg.arima_stepwise,
+            )
+            res = model.forecast(y=y, h=h, level=[cfg.arima_level], fitted=want_fitted)
+            fitted = np.asarray(res["fitted"], dtype=float) if want_fitted else None
+            mean = np.asarray(res["mean"], dtype=float)
+            lo = np.asarray(res[f"lo-{cfg.arima_level}"], dtype=float)
+            hi = np.asarray(res[f"hi-{cfg.arima_level}"], dtype=float)
+            sigma = (hi - lo) / (2.0 * z)
+            sigma = np.where(np.isfinite(sigma) & (sigma > 0), sigma, 1e-3)
+            return fitted, mean, sigma
+        except Exception as e:  # pragma: no cover - defensive
+            logger.info("AutoARIMA failed (%s); using constant-mean fallback", type(e).__name__)
+            mu = float(np.mean(y)) if len(y) else 0.0
+            sd = float(np.std(y)) or 1.0
+            fitted = np.full(len(y), mu) if want_fitted else None
+            return fitted, np.full(h, mu), np.full(h, sd)
+
+    def fit(self, historic_df: pd.DataFrame) -> "ArimaBaseRFResidualModel":
+        cfg = self.cfg
+        self._freq = detect_frequency(historic_df)
+        self._season_lengths = self._season_lengths_for(self._freq)
+        target = cfg.target_variable
+
+        deseason, _ = dec.decompose_panel(
+            historic_df, self._freq, target, self._season_lengths, cfg.log_transform
+        )
+        feats = build_model_features(
+            historic_df,
+            None,
+            self.feature_columns,
+            self._freq,
+            self._season_lengths,
+            cfg.feature_min_lag,
+            cfg.feature_max_lag,
+            cfg.use_location_dummies,
+            cfg.deseasonalize_covariates,
+        )
+        self._feat_cols = [c for c in feats.columns if c not in INDEX_COLS]
+
+        deseason = deseason.copy()
+        deseason["_ts"] = deseason["time_period"].apply(
+            lambda p: period_to_timestamp(p, self._freq)
+        )
+
+        # ARIMA residual = deseason - ARIMA in-sample fitted, per location.
+        resid_blocks = []
+        for loc, g in deseason.groupby("location", sort=False):
+            g = g.sort_values("_ts")
+            y = g[target].to_numpy(dtype=float)
+            y_filled = pd.Series(y).interpolate(limit_direction="both").to_numpy()
+            fitted, _, _ = self._arima(y_filled, h=1, want_fitted=True)
+            blk = g[INDEX_COLS].copy()
+            blk["_resid"] = y - fitted  # keeps NaN where y was NaN
+            resid_blocks.append(blk)
+        resid_df = pd.concat(resid_blocks, ignore_index=True)
+
+        design = feats.merge(resid_df, on=INDEX_COLS, how="left")
+        X = design[self._feat_cols].to_numpy(dtype=float)
+        yres = design["_resid"].to_numpy(dtype=float)
+        mask = ~(np.isnan(X).any(axis=1) | np.isnan(yres))
+
+        self._rf = RandomForestRegressor(
+            n_estimators=cfg.rf.n_estimators,
+            max_depth=cfg.rf.max_depth,
+            min_samples_leaf=cfg.rf.min_samples_leaf,
+            max_features=cfg.rf.max_features,
+            random_state=cfg.rf.random_state,
+            n_jobs=-1,
+        )
+        self._rf.fit(X[mask], yres[mask])
+        return self
+
+    def predict(self, historic_df: pd.DataFrame, future_df: pd.DataFrame) -> pd.DataFrame:
+        if self._rf is None:
+            raise RuntimeError("Call fit() before predict()")
+        cfg = self.cfg
+        freq = self._freq
+        target = cfg.target_variable
+        rng = np.random.default_rng(cfg.random_seed)
+
+        deseason_hist, decomps = dec.decompose_panel(
+            historic_df, freq, target, self._season_lengths, cfg.log_transform
+        )
+        deseason_hist = deseason_hist.copy()
+        deseason_hist["_ts"] = deseason_hist["time_period"].apply(
+            lambda p: period_to_timestamp(p, freq)
+        )
+
+        feats_all = build_model_features(
+            historic_df,
+            future_df,
+            self.feature_columns,
+            freq,
+            self._season_lengths,
+            cfg.feature_min_lag,
+            cfg.feature_max_lag,
+            cfg.use_location_dummies,
+            cfg.deseasonalize_covariates,
+        )
+        feats_all = feats_all.reindex(columns=INDEX_COLS + self._feat_cols, fill_value=0.0)
+        feats_all["_ts"] = feats_all["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+
+        future = future_df.copy()
+        future["_ts"] = future["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+
+        rows = []
+        for loc, fg in future.groupby("location", sort=False):
+            loc_str = str(loc)
+            fg = fg.sort_values("_ts")
+            times = fg["time_period"].astype(str).tolist()
+            h = len(fg)
+
+            y_hist = (
+                deseason_hist[deseason_hist["location"].astype(str) == loc_str]
+                .sort_values("_ts")[target]
+                .to_numpy(dtype=float)
+            )
+            y_hist = pd.Series(y_hist).interpolate(limit_direction="both").to_numpy()
+            _, mean_h, sigma_h = self._arima(y_hist, h=h, want_fitted=False)
+            arima_draws = rng.normal(
+                loc=mean_h[:, None], scale=sigma_h[:, None], size=(h, cfg.n_samples)
+            )
+
+            fut_feat = (
+                feats_all[feats_all["location"].astype(str) == loc_str]
+                .sort_values("_ts")
+                .tail(h)[self._feat_cols]
+                .to_numpy(dtype=float)
+            )
+            rf_resid = self._rf.predict(fut_feat)  # (h,)
+            seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
+
+            final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
+            if cfg.log_transform:
+                final = np.expm1(final)
+            final = np.clip(final, a_min=0.0, a_max=None)
+            if cfg.discretize_samples:
+                final = rng.poisson(final).astype(float)
+
+            for step in range(h):
+                row = {"time_period": times[step], "location": loc_str}
+                for i, v in enumerate(final[step]):
+                    row[f"sample_{i}"] = float(v)
+                rows.append(row)
+
+        sample_cols = [f"sample_{i}" for i in range(cfg.n_samples)]
+        return pd.DataFrame(rows)[INDEX_COLS + sample_cols]
