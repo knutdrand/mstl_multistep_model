@@ -21,9 +21,11 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# The trend model is reused verbatim from the sibling repo. For collaborators,
-# clone simple_multistep_model next to this one (or override CHAP_* paths).
-simple_multistep_model = { path = "../simple_multistep_model", editable = true }
+# The trend model is reused verbatim from the sibling repo. An ABSOLUTE path is
+# required because `chap eval` copies this project into a `runs/<ts>/` subdir and
+# runs uv from there, which would break a relative `../` source. Collaborators
+# should point this at their own checkout of simple_multistep_model.
+simple_multistep_model = { path = "/Users/knutdr/Sources/simple_multistep_model", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["mstl_multistep"]
