@@ -1,0 +1,22 @@
+additional_continuous_covariates:
+  - rainfall
+  - mean_temperature
+  - mean_relative_humidity
+user_option_values:
+  prob_model: rf_residual
+  target_variable: disease_cases
+  log_transform: true
+  season_length_monthly: 12
+  n_target_lags: 6
+  n_samples: 100
+  feature_min_lag: 1
+  feature_max_lag: 3
+  deseasonalize_covariates: true
+  arima_stepwise: true
+  arima_level: 68
+  rf:
+    n_estimators: 200
+    max_depth: null
+    min_samples_leaf: 5
+    max_features: sqrt
+    random_state: 42

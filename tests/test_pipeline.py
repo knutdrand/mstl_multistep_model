@@ -163,6 +163,22 @@ def test_arima_residual_widens_intervals_vs_multistep():
     assert spread > 0  # produces genuine dispersion
 
 
+@pytest.mark.parametrize(
+    "prob_model", ["multistep", "arima_residual", "recursive_residual", "rf_residual"]
+)
+def test_missing_location_history_is_finite(prob_model):
+    """A location whose target is entirely NaN must still yield finite forecasts."""
+    df = _synthetic_panel(n_locations=2, n_months=72)
+    df.loc[df["location"] == "loc1", "disease_cases"] = np.nan
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(prob_model=prob_model, n_samples=20, n_target_lags=4,
+                    rf={"n_estimators": 30, "random_state": 0})
+    model = build_chap_model(cfg, feature_columns=["rainfall"])
+    model.fit(historic)
+    preds = model.predict(historic, future)
+    assert np.isfinite(preds.filter(like="sample_").to_numpy()).all()
+
+
 @pytest.mark.parametrize("prob_model", ["multistep", "arima_residual"])
 def test_deseasonalized_covariates(prob_model):
     df = _synthetic_panel(n_months=72)

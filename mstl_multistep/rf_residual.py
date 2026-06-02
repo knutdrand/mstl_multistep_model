@@ -55,20 +55,29 @@ class ArimaBaseRFResidualModel:
     def _arima(self, y: np.ndarray, h: int, want_fitted: bool):
         """Return (fitted, mean, sigma) from AutoARIMA on a deseasonalized series.
 
-        ``y`` must be finite (caller interpolates). Falls back to a constant
-        mean model on failure so fit-time residuals and predict-time forecasts
-        stay mutually consistent.
+        Cleans the input internally (interpolate + ffill/bfill) so AutoARIMA
+        always sees a finite series. A series with no finite values at all (a
+        location with no history yet in this window) gets a zero-mean baseline.
+        Any ``fitted`` array is length ``len(y)`` so the caller can subtract it
+        from the original (NaN-bearing) series to form residuals.
         """
         cfg = self.cfg
-        z = norm.ppf(0.5 + cfg.arima_level / 200.0)
         h = max(int(h), 1)
+        y = np.asarray(y, dtype=float)
+        clean = pd.Series(y).interpolate(limit_direction="both").ffill().bfill().to_numpy()
+
+        if not np.isfinite(clean).all():
+            fitted = np.zeros(len(y)) if want_fitted else None
+            return fitted, np.zeros(h), np.ones(h)
+
+        z = norm.ppf(0.5 + cfg.arima_level / 200.0)
         try:
             model = AutoARIMA(
                 season_length=1,  # the series is already deseasonalized
                 approximation=cfg.arima_approximation,
                 stepwise=cfg.arima_stepwise,
             )
-            res = model.forecast(y=y, h=h, level=[cfg.arima_level], fitted=want_fitted)
+            res = model.forecast(y=clean, h=h, level=[cfg.arima_level], fitted=want_fitted)
             fitted = np.asarray(res["fitted"], dtype=float) if want_fitted else None
             mean = np.asarray(res["mean"], dtype=float)
             lo = np.asarray(res[f"lo-{cfg.arima_level}"], dtype=float)
@@ -78,8 +87,8 @@ class ArimaBaseRFResidualModel:
             return fitted, mean, sigma
         except Exception as e:  # pragma: no cover - defensive
             logger.info("AutoARIMA failed (%s); using constant-mean fallback", type(e).__name__)
-            mu = float(np.mean(y)) if len(y) else 0.0
-            sd = float(np.std(y)) or 1.0
+            mu = float(np.mean(clean))
+            sd = float(np.std(clean)) or 1.0
             fitted = np.full(len(y), mu) if want_fitted else None
             return fitted, np.full(h, mu), np.full(h, sd)
 
@@ -115,8 +124,7 @@ class ArimaBaseRFResidualModel:
         for loc, g in deseason.groupby("location", sort=False):
             g = g.sort_values("_ts")
             y = g[target].to_numpy(dtype=float)
-            y_filled = pd.Series(y).interpolate(limit_direction="both").to_numpy()
-            fitted, _, _ = self._arima(y_filled, h=1, want_fitted=True)
+            fitted, _, _ = self._arima(y, h=1, want_fitted=True)
             blk = g[INDEX_COLS].copy()
             blk["_resid"] = y - fitted  # keeps NaN where y was NaN
             resid_blocks.append(blk)
@@ -183,7 +191,6 @@ class ArimaBaseRFResidualModel:
                 .sort_values("_ts")[target]
                 .to_numpy(dtype=float)
             )
-            y_hist = pd.Series(y_hist).interpolate(limit_direction="both").to_numpy()
             _, mean_h, sigma_h = self._arima(y_hist, h=h, want_fitted=False)
             arima_draws = rng.normal(
                 loc=mean_h[:, None], scale=sigma_h[:, None], size=(h, cfg.n_samples)
@@ -195,7 +202,7 @@ class ArimaBaseRFResidualModel:
                 .tail(h)[self._feat_cols]
                 .to_numpy(dtype=float)
             )
-            rf_resid = self._rf.predict(fut_feat)  # (h,)
+            rf_resid = self._rf.predict(np.nan_to_num(fut_feat))  # (h,)
             seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
 
             final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
