@@ -98,22 +98,46 @@ chap eval \
   the RF out-of-bag residuals**. ARIMA supplies horizon-growing predictive
   variance, which the recursive bootstrap badly underestimates. This is the
   inverse of chap_nixtla's `mstl_arima_residual` (ARIMA base + neural residual).
+  **Best mode in practice.**
+- `recursive_residual` — deterministic RF point with one-step OOB residuals
+  resampled and compounded through the recursion (variance grows with horizon).
+  Fixes dispersion but empirically scores *worse* log-CRPS than `arima_residual`,
+  so it is not recommended; kept for comparison.
 
-## Benchmark (Lao admin1 monthly, 12 splits × h=3, tracked to MLflow)
+The tuned config (`config_tuned.yaml`) is `arima_residual` + deseasonalized
+climate, `n_target_lags=6`, RF `max_depth=null` (unlimited), chosen by
+`scripts/hpo.py`.
+
+## Benchmark — Lao admin1 monthly, 12 splits × h=3, tracked to MLflow
 
 | Model | log-CRPS | CRPS | MAE | cov 10–90 |
 |---|---|---|---|---|
 | `multistep` (RF+bootstrap) | 0.924 | 76.5 | 79.2 | 0.066 |
-| `arima_residual` (RF→ARIMA), no covariates | 0.766 | 60.7 | 76.4 | 0.484 |
+| `arima_residual`, no covariates | 0.766 | 60.7 | 76.4 | 0.484 |
 | `arima_residual` + raw climate | 0.727 | 56.0 | 71.1 | 0.493 |
 | `arima_residual` + deseasonalized climate | 0.716 | 54.3 | 70.2 | 0.502 |
-| chap_nixtla `mstl_arima` (baseline) | 0.662 | 53.4 | 68.3 | 0.580 |
+| `arima_residual` tuned (depth=null) | 0.712 | 54.1 | 69.9 | 0.510 |
+| chap_nixtla `mstl_arima` (baseline) | **0.662** | 53.4 | 68.3 | 0.580 |
 
-The `arima_residual` mode fixes the severe under-dispersion of the bootstrap
-mode (coverage 0.066 → 0.484) and adding climate covariates brings CRPS/MAE
-level with the classical MSTL+ARIMA baseline. Ablation: most of the climate
-gain comes from adding the covariates at all (0.766 → 0.727); MSTL-deseasonalizing
-them is a smaller but consistent extra improvement (0.727 → 0.716).
+Story: the `arima_residual` mode fixes the severe under-dispersion of the
+bootstrap mode (coverage 0.066 → 0.484); adding climate covariates brings
+CRPS/MAE level with the classical baseline (ablation: most of the gain is from
+adding climate at all, 0.766 → 0.727, with deseasonalizing a smaller extra
+0.727 → 0.716); a small HPO over lags/depth/leaf shaved another 0.004 (the
+architecture was already near its ceiling).
+
+## Benchmark — VNM admin1 monthly (generalization check)
+
+| Model | log-CRPS | CRPS | MAE | cov 10–90 |
+|---|---|---|---|---|
+| `arima_residual` tuned | 0.549 | 75.4 | 97.5 | 0.624 |
+| chap_nixtla `mstl_arima` (baseline) | **0.508** | 71.0 | 94.1 | 0.729 |
+
+The ranking holds on a second dataset: this model lands consistently close to
+but slightly behind the classical MSTL+ARIMA on both Lao (gap 0.050) and VNM
+(gap 0.041). **Recommendation: for these datasets, classical `mstl_arima` is
+still the model to beat; `arima_residual` is the competitive runner-up and the
+natural choice when nonlinear covariate effects matter.**
 
 ## Running standalone
 
