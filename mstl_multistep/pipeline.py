@@ -231,7 +231,7 @@ class MSTLMultistepModel:
 
 def build_chap_model(cfg: RunConfig, feature_columns: list[str]):
     """Return the configured model: recursive multistep or ARIMA-residual hybrid."""
-    if cfg.prob_model == "arima_residual":
+    if cfg.prob_model in ("arima_residual", "recursive_residual"):
         from mstl_multistep.arima_residual import MSTLArimaResidualModel
 
         return MSTLArimaResidualModel(cfg, feature_columns)

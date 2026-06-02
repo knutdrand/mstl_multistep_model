@@ -61,7 +61,7 @@ user_options:
     default: multistep
     title: How the deseasonalized series is forecast probabilistically
     type: string
-    enum: [multistep, arima_residual]
+    enum: [multistep, arima_residual, recursive_residual]
   prob_wrapper:
     default: bootstrap
     title: Probabilistic wrapper for the recursive multistep model

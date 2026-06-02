@@ -50,6 +50,7 @@ class MSTLArimaResidualModel:
         self._feat_cols: list[str] | None = None  # covariate/dummy columns (fixed order)
         self._order: list[str] | None = None       # full design order = feat_cols + lag names
         self._resid: dict[str, np.ndarray] = {}     # loc -> residual series (time order)
+        self._resid_pool: np.ndarray | None = None  # global one-step OOB residuals (recursive mode)
         self._freq: str | None = None
         self._season_lengths: list[int] | None = None
 
@@ -135,12 +136,45 @@ class MSTLArimaResidualModel:
         design = design.copy()
         design["_resid"] = design[target].to_numpy() - oob
 
+        # Global pool of honest one-step residuals (used by recursive_residual).
+        self._resid_pool = (design["_resid"].to_numpy(dtype=float))
+        self._resid_pool = self._resid_pool[np.isfinite(self._resid_pool)]
+
         for loc, g in design.groupby("location", sort=False):
             g = g.sort_values("_ts")
             r = pd.Series(g["_resid"].to_numpy(), dtype=float)
             r = r.interpolate(limit_direction="both")
             self._resid[str(loc)] = r.dropna().to_numpy(dtype=float)
         return self
+
+    def _recursive_forecast_samples(
+        self,
+        seed_lags: np.ndarray,
+        future_feats: np.ndarray,
+        h: int,
+        n: int,
+        rng,
+    ) -> np.ndarray:
+        """Recursive RF forecast with one-step OOB residuals resampled per step.
+
+        Each of the ``n`` paths feeds its own noisy prediction back into the lag
+        window, so the residual variance compounds with horizon. Returns the
+        deseasonalized draws, shape ``(h, n)`` (point + accumulated noise).
+        """
+        L = self.cfg.n_target_lags
+        pool = self._resid_pool if self._resid_pool is not None and len(self._resid_pool) else np.array([0.0])
+        recent = np.tile(seed_lags[-L:].astype(float), (n, 1))  # (n, L) oldest..newest
+        out = np.empty((h, n))
+        for step in range(h):
+            # design lag order is tlag_1 (newest) .. tlag_L (oldest) == recent reversed
+            lag_block = recent[:, ::-1]
+            X = np.column_stack([np.tile(future_feats[step], (n, 1)), lag_block])
+            point = self._rf.predict(X)
+            eps = rng.choice(pool, size=n, replace=True)
+            y = point + eps
+            out[step] = y
+            recent = np.column_stack([recent[:, 1:], y[:, None]])
+        return out
 
     def _rf_point_forecast(
         self,
@@ -260,11 +294,17 @@ class MSTLArimaResidualModel:
                 .to_numpy(dtype=float)
             )
 
-            rf_point = self._rf_point_forecast(loc_str, seed, fut_feat_rows, h)
-            resid_draws = self._arima_forecast(loc_str, h, rng)  # (h, n_samples)
             seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
 
-            final = seasonal[:, None] + rf_point[:, None] + resid_draws  # (h, n)
+            if cfg.prob_model == "recursive_residual":
+                deseason_draws = self._recursive_forecast_samples(
+                    seed, fut_feat_rows, h, cfg.n_samples, rng
+                )  # (h, n) already point + compounded noise
+                final = seasonal[:, None] + deseason_draws
+            else:
+                rf_point = self._rf_point_forecast(loc_str, seed, fut_feat_rows, h)
+                resid_draws = self._arima_forecast(loc_str, h, rng)  # (h, n_samples)
+                final = seasonal[:, None] + rf_point[:, None] + resid_draws  # (h, n)
             if cfg.log_transform:
                 final = np.expm1(final)
             final = np.clip(final, a_min=0.0, a_max=None)

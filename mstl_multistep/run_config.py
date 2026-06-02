@@ -57,9 +57,11 @@ class RunConfig(BaseModel):
     deseasonalize_covariates: bool = True
 
     # How the deseasonalized series is forecast probabilistically:
-    #   "multistep"      -> recursive RF from simple_multistep_model + prob_wrapper
-    #   "arima_residual" -> deterministic RF point + AutoARIMA on OOB residuals
-    prob_model: Literal["multistep", "arima_residual"] = "multistep"
+    #   "multistep"          -> recursive RF from simple_multistep_model + prob_wrapper
+    #   "arima_residual"     -> deterministic RF point + AutoARIMA on one-step OOB residuals
+    #   "recursive_residual" -> RF point with one-step OOB residuals resampled and
+    #                           compounded through the recursion (variance grows with horizon)
+    prob_model: Literal["multistep", "arima_residual", "recursive_residual"] = "multistep"
 
     # multistep-only
     prob_wrapper: ProbWrapper = "bootstrap"

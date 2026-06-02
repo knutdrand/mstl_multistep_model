@@ -78,6 +78,43 @@ def test_fit_predict_with_covariates():
 
 
 @pytest.mark.parametrize("covariates", [[], ["rainfall"]])
+def test_recursive_residual_fit_predict(covariates):
+    df = _synthetic_panel(n_months=72)
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(
+        prob_model="recursive_residual",
+        n_samples=30,
+        n_target_lags=4,
+        rf={"n_estimators": 40, "random_state": 0},
+    )
+    model = build_chap_model(cfg, feature_columns=covariates)
+    model.fit(historic)
+    preds = model.predict(historic, future)
+    assert len(preds) == len(future)
+    vals = preds.filter(like="sample_").to_numpy()
+    assert np.isfinite(vals).all() and (vals >= 0).all()
+
+
+def test_recursive_residual_variance_grows_with_horizon():
+    """Compounded residuals should widen the spread at later horizons."""
+    df = _synthetic_panel(n_locations=1, n_months=96)
+    historic, future = _split(df, horizon=8)
+    cfg = RunConfig(
+        prob_model="recursive_residual",
+        n_samples=200,
+        n_target_lags=6,
+        log_transform=False,  # compare spread in the native space
+        rf={"n_estimators": 80, "random_state": 0},
+    )
+    model = build_chap_model(cfg, [])
+    model.fit(historic)
+    preds = model.predict(historic, future).sort_values("time_period")
+    spreads = preds.filter(like="sample_").std(axis=1).to_numpy()
+    # later-horizon spread should exceed the first step (allowing some noise)
+    assert spreads[-1] > spreads[0]
+
+
+@pytest.mark.parametrize("covariates", [[], ["rainfall"]])
 def test_arima_residual_fit_predict(covariates):
     df = _synthetic_panel(n_months=72)
     historic, future = _split(df, horizon=3)
