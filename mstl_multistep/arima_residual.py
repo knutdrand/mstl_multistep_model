@@ -30,7 +30,7 @@ from sklearn.ensemble import RandomForestRegressor
 from statsforecast.models import AutoARIMA
 
 from mstl_multistep import decomposition as dec
-from mstl_multistep.features import INDEX_COLS, build_features
+from mstl_multistep.features import INDEX_COLS, build_model_features
 from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
 from mstl_multistep.run_config import RunConfig
 
@@ -94,12 +94,16 @@ class MSTLArimaResidualModel:
         deseason, _ = dec.decompose_panel(
             historic_df, self._freq, target, self._season_lengths, cfg.log_transform
         )
-        feats = build_features(
+        feats = build_model_features(
             historic_df,
+            None,
             self.feature_columns,
+            self._freq,
+            self._season_lengths,
             cfg.feature_min_lag,
             cfg.feature_max_lag,
             cfg.use_location_dummies,
+            cfg.deseasonalize_covariates,
         )
         self._feat_cols = [c for c in feats.columns if c not in INDEX_COLS]
 
@@ -208,12 +212,16 @@ class MSTLArimaResidualModel:
         deseason_hist, decomps = dec.decompose_panel(
             historic_df, freq, target, self._season_lengths, cfg.log_transform
         )
-        feats_all = build_features(
-            pd.concat([historic_df, future_df], ignore_index=True),
+        feats_all = build_model_features(
+            historic_df,
+            future_df,
             self.feature_columns,
+            freq,
+            self._season_lengths,
             cfg.feature_min_lag,
             cfg.feature_max_lag,
             cfg.use_location_dummies,
+            cfg.deseasonalize_covariates,
         )
         feats_all = feats_all.reindex(columns=INDEX_COLS + self._feat_cols, fill_value=0.0)
         feats_all["_ts"] = feats_all["time_period"].apply(lambda p: period_to_timestamp(p, freq))

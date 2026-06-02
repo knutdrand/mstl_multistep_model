@@ -40,7 +40,7 @@ from skpro.regression.bootstrap import BootstrapRegressor
 from sklearn.ensemble import RandomForestRegressor
 
 from mstl_multistep import decomposition as dec
-from mstl_multistep.features import INDEX_COLS, build_features
+from mstl_multistep.features import INDEX_COLS, build_model_features
 from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
 from mstl_multistep.run_config import RunConfig
 
@@ -128,12 +128,16 @@ class MSTLMultistepModel:
         self._season_lengths = self._season_lengths_for(self._freq)
 
         deseason, _ = self._decompose_panel(historic_df, self._freq)
-        feats = build_features(
+        feats = build_model_features(
             historic_df,
+            None,
             self.feature_columns,
+            self._freq,
+            self._season_lengths,
             cfg.feature_min_lag,
             cfg.feature_max_lag,
             cfg.use_location_dummies,
+            cfg.deseasonalize_covariates,
         )
 
         one_step, bucket = _build_one_step(cfg)
@@ -156,12 +160,16 @@ class MSTLMultistepModel:
         # deseasonalized values used to seed the recursive lag window.
         deseason_hist, decomps = self._decompose_panel(historic_df, freq)
 
-        feats = build_features(
-            pd.concat([historic_df, future_df], ignore_index=True),
+        feats = build_model_features(
+            historic_df,
+            future_df,
             self.feature_columns,
+            freq,
+            self._season_lengths,
             cfg.feature_min_lag,
             cfg.feature_max_lag,
             cfg.use_location_dummies,
+            cfg.deseasonalize_covariates,
         )
 
         y_xr = target_to_xarray(deseason_hist, target, ffill=True)

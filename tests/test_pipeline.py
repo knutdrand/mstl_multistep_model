@@ -109,6 +109,39 @@ def test_arima_residual_widens_intervals_vs_multistep():
     assert spread > 0  # produces genuine dispersion
 
 
+@pytest.mark.parametrize("prob_model", ["multistep", "arima_residual"])
+def test_deseasonalized_covariates(prob_model):
+    df = _synthetic_panel(n_months=72)
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(
+        prob_model=prob_model,
+        deseasonalize_covariates=True,
+        n_samples=20,
+        n_target_lags=4,
+        rf={"n_estimators": 40, "random_state": 0},
+    )
+    model = build_chap_model(cfg, feature_columns=["rainfall"])
+    model.fit(historic)
+    preds = model.predict(historic, future)
+    assert len(preds) == len(future)
+    vals = preds.filter(like="sample_").to_numpy()
+    assert np.isfinite(vals).all() and (vals >= 0).all()
+
+
+def test_deseasonalize_covariates_removes_seasonal_cycle():
+    """A purely seasonal covariate should be flattened to ~0 after deseasonalizing."""
+    from mstl_multistep import decomposition as dec
+
+    df = _synthetic_panel(n_locations=1, n_months=72)
+    # overwrite rainfall with a pure 12-month sinusoid (no trend, no noise)
+    t = np.arange(len(df))
+    df = df.copy()
+    df["rainfall"] = 10 * np.sin(2 * np.pi * t / 12)
+    out = dec.deseasonalize_covariates(df, None, "MS", ["rainfall"], [12])
+    # after removing the seasonal component, the anomaly should be tiny
+    assert np.nanmax(np.abs(out["rainfall"].to_numpy())) < 2.0
+
+
 def test_seasonality_is_reconstructed():
     """Samples should track the seasonal phase, not be flat."""
     df = _synthetic_panel(n_locations=1, n_months=72)

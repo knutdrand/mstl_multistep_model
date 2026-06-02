@@ -55,3 +55,36 @@ def build_features(
     if use_location_dummies:
         out = one_hot_locations(out)
     return out
+
+
+def build_model_features(
+    historic_df: pd.DataFrame,
+    future_df: pd.DataFrame | None,
+    feature_columns: list[str],
+    freq: str,
+    season_lengths: list[int],
+    min_lag: int,
+    max_lag: int,
+    use_location_dummies: bool,
+    deseasonalize_covariates: bool,
+) -> pd.DataFrame:
+    """Build features for fit (``future_df=None``) or predict (future provided).
+
+    When ``deseasonalize_covariates`` is set and the data actually carries
+    covariates, the covariate columns are MSTL-deseasonalized first (so the RF
+    sees climate *anomalies*, matching the deseasonalized target); otherwise the
+    raw columns are lagged as-is.
+    """
+    has_cov = any(c in historic_df.columns for c in feature_columns)
+    if deseasonalize_covariates and has_cov:
+        from mstl_multistep import decomposition as dec
+
+        source = dec.deseasonalize_covariates(
+            historic_df, future_df, freq, feature_columns, season_lengths
+        )
+    elif future_df is None:
+        source = historic_df
+    else:
+        source = pd.concat([historic_df, future_df], ignore_index=True)
+
+    return build_features(source, feature_columns, min_lag, max_lag, use_location_dummies)
