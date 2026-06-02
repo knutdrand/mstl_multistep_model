@@ -105,12 +105,15 @@ chap eval \
 |---|---|---|---|---|
 | `multistep` (RF+bootstrap) | 0.924 | 76.5 | 79.2 | 0.066 |
 | `arima_residual` (RF→ARIMA), no covariates | 0.766 | 60.7 | 76.4 | 0.484 |
+| `arima_residual` + raw climate | 0.727 | 56.0 | 71.1 | 0.493 |
 | `arima_residual` + deseasonalized climate | 0.716 | 54.3 | 70.2 | 0.502 |
 | chap_nixtla `mstl_arima` (baseline) | 0.662 | 53.4 | 68.3 | 0.580 |
 
 The `arima_residual` mode fixes the severe under-dispersion of the bootstrap
-mode (coverage 0.066 → 0.484) and adding MSTL-deseasonalized climate covariates
-brings CRPS/MAE level with the classical MSTL+ARIMA baseline.
+mode (coverage 0.066 → 0.484) and adding climate covariates brings CRPS/MAE
+level with the classical MSTL+ARIMA baseline. Ablation: most of the climate
+gain comes from adding the covariates at all (0.766 → 0.727); MSTL-deseasonalizing
+them is a smaller but consistent extra improvement (0.727 → 0.716).
 
 ## Running standalone
 
