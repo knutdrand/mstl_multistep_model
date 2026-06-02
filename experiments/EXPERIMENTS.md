@@ -13,4 +13,4 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
 
 | # | branch / commit | lever | hypothesis / change | log_crps | crps | mae | coverage | verdict | mlflow | notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 0 | improve/spray-setup | — | baseline: rf_residual + deseasonalized climate, **no IRS** | _pending_ | | | | baseline | | config_irs_baseline.yaml |
+| 0 | improve/spray-setup @2c6eebe | — | baseline: rf_residual + deseasonalized climate, **no IRS** | **0.3253** | 83.6 | 113.3 | 0.757 / 0.477 | baseline | — | config_irs_baseline.yaml; ~14 min/eval. Matches old leaderboard 0.3258 that had binary sprayed_* flags → flags added ~nothing |
