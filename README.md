@@ -104,12 +104,13 @@ chap eval \
 | Model | log-CRPS | CRPS | MAE | cov 10–90 |
 |---|---|---|---|---|
 | `multistep` (RF+bootstrap) | 0.924 | 76.5 | 79.2 | 0.066 |
-| `arima_residual` (RF→ARIMA) | 0.766 | 60.7 | 76.4 | 0.484 |
+| `arima_residual` (RF→ARIMA), no covariates | 0.766 | 60.7 | 76.4 | 0.484 |
+| `arima_residual` + deseasonalized climate | 0.716 | 54.3 | 70.2 | 0.502 |
 | chap_nixtla `mstl_arima` (baseline) | 0.662 | 53.4 | 68.3 | 0.580 |
 
 The `arima_residual` mode fixes the severe under-dispersion of the bootstrap
-mode (coverage 0.066 → 0.484) and improves log-CRPS, but does not yet beat the
-classical MSTL+ARIMA baseline.
+mode (coverage 0.066 → 0.484) and adding MSTL-deseasonalized climate covariates
+brings CRPS/MAE level with the classical MSTL+ARIMA baseline.
 
 ## Running standalone
 
