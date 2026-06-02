@@ -1,0 +1,21 @@
+additional_continuous_covariates: []
+user_option_values:
+  target_variable: disease_cases
+  log_transform: true
+  season_length_monthly: 12
+  season_length_weekly: 52
+  n_target_lags: 6
+  n_samples: 100
+  feature_min_lag: 1
+  feature_max_lag: 3
+  prob_wrapper: bootstrap
+  min_bucket_size: 5
+  use_location_dummies: true
+  discretize_samples: false
+  random_seed: 42
+  rf:
+    n_estimators: 200
+    max_depth: 10
+    min_samples_leaf: 5
+    max_features: sqrt
+    random_state: 42

@@ -1,0 +1,90 @@
+"""Smoke + invariant tests for the MSTL + multistep pipeline."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from mstl_multistep import MSTLMultistepModel, RunConfig
+
+
+def _synthetic_panel(n_locations=2, n_months=60, seed=0):
+    rng = np.random.default_rng(seed)
+    months = pd.period_range("2010-01", periods=n_months, freq="M").astype(str)
+    rows = []
+    for li in range(n_locations):
+        t = np.arange(n_months)
+        seasonal = 5 * np.sin(2 * np.pi * t / 12)
+        trend = 0.1 * t + 10 * li
+        noise = rng.normal(0, 1, n_months)
+        cases = np.clip(trend + seasonal + noise, 0, None).round()
+        rows.append(
+            pd.DataFrame(
+                {
+                    "time_period": months,
+                    "location": f"loc{li}",
+                    "disease_cases": cases,
+                    "rainfall": rng.normal(50, 10, n_months),
+                }
+            )
+        )
+    return pd.concat(rows, ignore_index=True)
+
+
+def _split(df, horizon=3):
+    """Hold out the last `horizon` months per location as the future window."""
+    historic, future = [], []
+    for _, g in df.groupby("location", sort=False):
+        g = g.sort_values("time_period")
+        historic.append(g.iloc[:-horizon])
+        future.append(g.iloc[-horizon:])
+    return (
+        pd.concat(historic, ignore_index=True),
+        pd.concat(future, ignore_index=True),
+    )
+
+
+@pytest.mark.parametrize("prob_wrapper", ["bootstrap", "bucketedresidual"])
+def test_fit_predict_shapes_no_covariates(prob_wrapper):
+    df = _synthetic_panel()
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(
+        n_samples=20,
+        n_target_lags=4,
+        prob_wrapper=prob_wrapper,
+        rf={"n_estimators": 30, "random_state": 0},
+    )
+    model = MSTLMultistepModel(cfg, feature_columns=[])
+    model.fit(historic)
+    preds = model.predict(historic, future)
+
+    assert set(preds["location"]) == {"loc0", "loc1"}
+    assert len(preds) == len(future)
+    sample_cols = [c for c in preds.columns if c.startswith("sample_")]
+    assert len(sample_cols) == 20
+    vals = preds[sample_cols].to_numpy()
+    assert np.isfinite(vals).all()
+    assert (vals >= 0).all()  # forecasts are non-negative counts
+
+
+def test_fit_predict_with_covariates():
+    df = _synthetic_panel()
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(n_samples=15, n_target_lags=4, rf={"n_estimators": 30, "random_state": 0})
+    model = MSTLMultistepModel(cfg, feature_columns=["rainfall"])
+    model.fit(historic)
+    preds = model.predict(historic, future)
+    assert len(preds) == len(future)
+    assert (preds.filter(like="sample_").to_numpy() >= 0).all()
+
+
+def test_seasonality_is_reconstructed():
+    """Samples should track the seasonal phase, not be flat."""
+    df = _synthetic_panel(n_locations=1, n_months=72)
+    historic, future = _split(df, horizon=12)
+    cfg = RunConfig(n_samples=50, n_target_lags=6, rf={"n_estimators": 50, "random_state": 0})
+    model = MSTLMultistepModel(cfg, feature_columns=[])
+    model.fit(historic)
+    preds = model.predict(historic, future).sort_values("time_period")
+    means = preds.filter(like="sample_").mean(axis=1).to_numpy()
+    # A full year of forecasts should show seasonal variation.
+    assert means.std() > 0.5 * means.mean() * 0.1

@@ -1,0 +1,98 @@
+name: mstl_multistep_model
+
+meta_data:
+  author: Knut Rand
+  author_note: >
+    MSTL-decomposes each series in log1p space, then fits the recursive
+    multistep model from simple_multistep_model on the deseasonalized
+    (trend + remainder) series. Seasonality is extrapolated seasonal-naive
+    and added back before expm1. Self-forecasts seasonality and does not
+    depend on future covariates by default.
+  author_assessed_status: yellow
+  contact_email: knutdrand@gmail.com
+  description: >
+    MSTL + simple recursive multistep trend model for CHAP. Designed for
+    small, noisy, highly-seasonal surveillance data.
+  display_name: MSTL + Multistep Trend
+  organization: HISP Centre, University of Oslo
+  citation_info: >
+    Climate Health Analytics Platform. 2026. "MSTL + Multistep Trend Model".
+    HISP Centre, University of Oslo.
+
+allow_free_additional_continuous_covariates: true
+required_covariates: []
+supported_period_type: any
+target: disease_cases
+
+user_options:
+  target_variable:
+    default: disease_cases
+    title: Target column to forecast
+    type: string
+  log_transform:
+    default: true
+    title: Decompose on log1p(target) and expm1 the forecasts
+    type: boolean
+  season_length_monthly:
+    default: 12
+    title: MSTL season length for monthly data
+    type: integer
+  season_length_weekly:
+    default: 52
+    title: MSTL season length for weekly data
+    type: integer
+  n_target_lags:
+    default: 6
+    title: Lagged deseasonalized-target values fed back as features
+    type: integer
+  n_samples:
+    default: 100
+    title: Number of probabilistic sample paths
+    type: integer
+  feature_min_lag:
+    default: 1
+    title: Smallest covariate lag (periods)
+    type: integer
+  feature_max_lag:
+    default: 3
+    title: Largest covariate lag (periods)
+    type: integer
+  prob_wrapper:
+    default: bootstrap
+    title: Probabilistic wrapper around the one-step regressor
+    type: string
+    enum: [bootstrap, cross-conformal, bucketedresidual]
+  min_bucket_size:
+    default: 5
+    title: Min residual bucket size (only for bucketedresidual)
+    type: integer
+  use_location_dummies:
+    default: true
+    title: Add one-hot location columns so the pooled model keeps per-series identity
+    type: boolean
+  discretize_samples:
+    default: false
+    title: Poisson-resample expected counts for count discreteness
+    type: boolean
+  random_seed:
+    default: 42
+    title: Random seed for sampling
+    type: integer
+
+uv_env: pyproject.toml
+
+entry_points:
+  train:
+    parameters:
+      train_data: str
+      model: str
+      model_config: str
+    command: "python train.py {train_data} {model} --config {model_config}"
+  predict:
+    parameters:
+      historic_data: str
+      future_data: str
+      model: str
+      out_file: str
+      model_config: str
+    command: "python predict.py {model} {historic_data} {future_data} {out_file} --config {model_config}"
