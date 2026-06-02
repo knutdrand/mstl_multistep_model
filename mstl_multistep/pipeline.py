@@ -112,30 +112,13 @@ class MSTLMultistepModel:
         return [int(sl)]
 
     def _decompose_panel(self, df: pd.DataFrame, freq: str):
-        """Return (deseasonalized_target_df, {loc: decomp_frame}).
-
-        The returned frame has the index columns plus the (de-seasonalized,
-        and log-transformed if configured) target column. Decompositions are
-        kept per location for seasonal extrapolation at predict time.
-        """
-        target = self.cfg.target_variable
-        df = df.copy()
-        df["_ts"] = df["time_period"].apply(lambda p: period_to_timestamp(p, freq))
-
-        blocks: list[pd.DataFrame] = []
-        decomps: dict[str, pd.DataFrame] = {}
-        for loc, g in df.groupby("location", sort=False):
-            g = g.sort_values("_ts")
-            y = pd.to_numeric(g[target], errors="coerce").to_numpy(dtype=float)
-            y_t = np.log1p(np.clip(y, a_min=0.0, a_max=None)) if self.cfg.log_transform else y
-            decomp = dec.decompose(y_t, self._season_lengths)
-            decomps[str(loc)] = decomp
-            sub = g[INDEX_COLS].copy()
-            sub[target] = dec.deseasonalize(decomp)
-            blocks.append(sub)
-
-        deseason = pd.concat(blocks, ignore_index=True)
-        return deseason, decomps
+        return dec.decompose_panel(
+            df,
+            freq,
+            self.cfg.target_variable,
+            self._season_lengths,
+            self.cfg.log_transform,
+        )
 
     # -- public API --------------------------------------------------------
 
@@ -236,3 +219,12 @@ class MSTLMultistepModel:
             wide[sample_cols] = rng.poisson(wide[sample_cols].to_numpy()).astype(float)
 
         return wide[INDEX_COLS + sample_cols]
+
+
+def build_chap_model(cfg: RunConfig, feature_columns: list[str]):
+    """Return the configured model: recursive multistep or ARIMA-residual hybrid."""
+    if cfg.prob_model == "arima_residual":
+        from mstl_multistep.arima_residual import MSTLArimaResidualModel
+
+        return MSTLArimaResidualModel(cfg, feature_columns)
+    return MSTLMultistepModel(cfg, feature_columns)

@@ -5,7 +5,7 @@ import pickle
 
 import pandas as pd
 
-from mstl_multistep import ChapModelConfiguration, MSTLMultistepModel, load_model_configuration
+from mstl_multistep import ChapModelConfiguration, build_chap_model, load_model_configuration
 
 
 def train(train_data_path: str, model_path: str, config_path: str | None = None) -> None:
@@ -14,7 +14,7 @@ def train(train_data_path: str, model_path: str, config_path: str | None = None)
     )
     data = pd.read_csv(train_data_path)
 
-    model = MSTLMultistepModel(
+    model = build_chap_model(
         cfg=model_cfg.user_option_values,
         feature_columns=model_cfg.additional_continuous_covariates,
     )

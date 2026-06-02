@@ -5,7 +5,7 @@ import pickle
 
 import pandas as pd
 
-from mstl_multistep import ChapModelConfiguration, MSTLMultistepModel, load_model_configuration
+from mstl_multistep import ChapModelConfiguration, load_model_configuration
 
 
 def predict(
@@ -20,7 +20,7 @@ def predict(
     _ = load_model_configuration(config_path) if config_path else ChapModelConfiguration()
 
     with open(model_path, "rb") as f:
-        model: MSTLMultistepModel = pickle.load(f)
+        model = pickle.load(f)
 
     historic = pd.read_csv(historic_data_path)
     future = pd.read_csv(future_data_path)

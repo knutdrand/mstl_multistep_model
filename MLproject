@@ -57,14 +57,31 @@ user_options:
     default: 3
     title: Largest covariate lag (periods)
     type: integer
+  prob_model:
+    default: multistep
+    title: How the deseasonalized series is forecast probabilistically
+    type: string
+    enum: [multistep, arima_residual]
   prob_wrapper:
     default: bootstrap
-    title: Probabilistic wrapper around the one-step regressor
+    title: Probabilistic wrapper for the recursive multistep model
     type: string
     enum: [bootstrap, cross-conformal, bucketedresidual]
   min_bucket_size:
     default: 5
     title: Min residual bucket size (only for bucketedresidual)
+    type: integer
+  arima_approximation:
+    default: false
+    title: AutoARIMA approximation (arima_residual only)
+    type: boolean
+  arima_stepwise:
+    default: true
+    title: AutoARIMA stepwise search (arima_residual only)
+    type: boolean
+  arima_level:
+    default: 68
+    title: Interval level used to read AutoARIMA sigma (arima_residual only)
     type: integer
   use_location_dummies:
     default: true

@@ -1,0 +1,16 @@
+additional_continuous_covariates: []
+user_option_values:
+  prob_model: arima_residual
+  target_variable: disease_cases
+  log_transform: true
+  season_length_monthly: 12
+  n_target_lags: 6
+  n_samples: 100
+  arima_stepwise: true
+  arima_level: 68
+  rf:
+    n_estimators: 200
+    max_depth: 10
+    min_samples_leaf: 5
+    max_features: sqrt
+    random_state: 42

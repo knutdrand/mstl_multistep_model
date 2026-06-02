@@ -16,7 +16,11 @@ import numpy as np
 import pandas as pd
 from statsforecast.mstl import mstl
 
+from mstl_multistep.io_utils import period_to_timestamp
+
 logger = logging.getLogger(__name__)
+
+INDEX_COLS = ["time_period", "location"]
 
 
 def _seasonal_columns(decomp: pd.DataFrame) -> list[str]:
@@ -64,6 +68,38 @@ def seasonal_component(decomp: pd.DataFrame) -> np.ndarray:
 def deseasonalize(decomp: pd.DataFrame) -> np.ndarray:
     """``data - seasonal`` — keeps NaN wherever the original data was NaN."""
     return decomp["data"].to_numpy(dtype=float) - seasonal_component(decomp)
+
+
+def decompose_panel(
+    df: pd.DataFrame,
+    freq: str,
+    target: str,
+    season_lengths: list[int],
+    log_transform: bool,
+):
+    """MSTL-decompose every location's series.
+
+    Returns ``(deseasonalized_df, {loc: decomp_frame})`` where
+    ``deseasonalized_df`` has the index columns plus the (de-seasonalized,
+    and log1p-transformed if requested) target column. Original NaNs in the
+    target are preserved in the deseasonalized output.
+    """
+    df = df.copy()
+    df["_ts"] = df["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+
+    blocks: list[pd.DataFrame] = []
+    decomps: dict[str, pd.DataFrame] = {}
+    for loc, g in df.groupby("location", sort=False):
+        g = g.sort_values("_ts")
+        y = pd.to_numeric(g[target], errors="coerce").to_numpy(dtype=float)
+        y_t = np.log1p(np.clip(y, a_min=0.0, a_max=None)) if log_transform else y
+        decomp = decompose(y_t, season_lengths)
+        decomps[str(loc)] = decomp
+        sub = g[INDEX_COLS].copy()
+        sub[target] = deseasonalize(decomp)
+        blocks.append(sub)
+
+    return pd.concat(blocks, ignore_index=True), decomps
 
 
 def extrapolate_seasonal(

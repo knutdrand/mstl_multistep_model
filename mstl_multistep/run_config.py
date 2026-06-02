@@ -46,14 +46,26 @@ class RunConfig(BaseModel):
     season_length_monthly: int = 12
     season_length_weekly: int = 52
 
-    # Recursive multistep trend model (fit on the deseasonalized series)
+    # Trend model on the deseasonalized series
     n_target_lags: int = 6
     n_samples: int = 100
     feature_min_lag: int = 1
     feature_max_lag: int = 3
+    use_location_dummies: bool = True
+
+    # How the deseasonalized series is forecast probabilistically:
+    #   "multistep"      -> recursive RF from simple_multistep_model + prob_wrapper
+    #   "arima_residual" -> deterministic RF point + AutoARIMA on OOB residuals
+    prob_model: Literal["multistep", "arima_residual"] = "multistep"
+
+    # multistep-only
     prob_wrapper: ProbWrapper = "bootstrap"
     min_bucket_size: int = 5
-    use_location_dummies: bool = True
+
+    # arima_residual-only (AutoARIMA on the RF out-of-bag residuals)
+    arima_approximation: bool = False
+    arima_stepwise: bool = True
+    arima_level: int = 68
 
     # Output post-processing
     discretize_samples: bool = False

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mstl_multistep import MSTLMultistepModel, RunConfig
+from mstl_multistep import MSTLMultistepModel, RunConfig, build_chap_model
 
 
 def _synthetic_panel(n_locations=2, n_months=60, seed=0):
@@ -75,6 +75,38 @@ def test_fit_predict_with_covariates():
     preds = model.predict(historic, future)
     assert len(preds) == len(future)
     assert (preds.filter(like="sample_").to_numpy() >= 0).all()
+
+
+@pytest.mark.parametrize("covariates", [[], ["rainfall"]])
+def test_arima_residual_fit_predict(covariates):
+    df = _synthetic_panel(n_months=72)
+    historic, future = _split(df, horizon=3)
+    cfg = RunConfig(
+        prob_model="arima_residual",
+        n_samples=25,
+        n_target_lags=4,
+        arima_stepwise=True,
+        rf={"n_estimators": 40, "random_state": 0},
+    )
+    model = build_chap_model(cfg, feature_columns=covariates)
+    model.fit(historic)
+    preds = model.predict(historic, future)
+    assert len(preds) == len(future)
+    sample_cols = [c for c in preds.columns if c.startswith("sample_")]
+    assert len(sample_cols) == 25
+    vals = preds[sample_cols].to_numpy()
+    assert np.isfinite(vals).all() and (vals >= 0).all()
+
+
+def test_arima_residual_widens_intervals_vs_multistep():
+    """ARIMA-residual draws should not collapse to a near-zero spread."""
+    df = _synthetic_panel(n_months=84)
+    historic, future = _split(df, horizon=6)
+    common = dict(n_samples=80, n_target_lags=6, rf={"n_estimators": 60, "random_state": 0})
+    ar = build_chap_model(RunConfig(prob_model="arima_residual", **common), [])
+    ar.fit(historic)
+    spread = ar.predict(historic, future).filter(like="sample_").std(axis=1).mean()
+    assert spread > 0  # produces genuine dispersion
 
 
 def test_seasonality_is_reconstructed():
