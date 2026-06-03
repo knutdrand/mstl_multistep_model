@@ -65,9 +65,10 @@ def main():
     print(f"locations={df.location.nunique()} splits={len(splits)}")
 
     configs = [("em=1 (current)", {"em_iterations": 1})]
-    for K in (2, 3):
-        for d in (1.0, 0.5):
-            configs.append((f"em={K} damp={d}", {"em_iterations": K, "em_damping": d}))
+    for d in (1.0, 0.5):
+        for s in (1.0, 1.2, 1.4):
+            configs.append((f"em=2 damp={d} sig={s}",
+                            {"em_iterations": 2, "em_damping": d, "em_sigma_scale": s}))
 
     res = []
     for label, over in configs:

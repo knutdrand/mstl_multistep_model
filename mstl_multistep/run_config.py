@@ -111,6 +111,11 @@ class RunConfig(BaseModel):
     # blends new/old covariate estimates (1 = full update). Requires rf_target_lags=0.
     em_iterations: int = 1
     em_damping: float = 1.0
+    # Scale the ARIMA predictive sigma in the EM variant. Removing the covariate
+    # effect before ARIMA shrinks its sigma, but the RF effect is added back as a
+    # deterministic point — so the spread loses the covariate effect's prediction
+    # uncertainty and under-disperses. >1 re-inflates to recover calibration.
+    em_sigma_scale: float = 1.0
 
     # Output post-processing
     discretize_samples: bool = False

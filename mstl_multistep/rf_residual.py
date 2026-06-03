@@ -380,6 +380,7 @@ class ArimaBaseRFResidualModel:
             decomp = dec.decompose(Lc, self._season_lengths)
             Dclean = Lc - dec.seasonal_component(decomp)
             _, mean_h, sigma_h = self._arima(Dclean, h=h, want_fitted=False)
+            sigma_h = sigma_h * cfg.em_sigma_scale
             seasonal = dec.extrapolate_seasonal(decomp, self._season_lengths, h)
             C_fut = np.array([cmap.get((loc_str, t), 0.0) for t in times])
             arima_draws = rng.normal(mean_h[:, None], sigma_h[:, None], size=(h, cfg.n_samples))
