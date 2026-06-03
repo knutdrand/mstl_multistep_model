@@ -105,6 +105,7 @@ class MSTLArimaResidualModel:
             cfg.feature_max_lag,
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
+            cfg.lags_by_col(),
         )
         self._feat_cols = [c for c in feats.columns if c not in INDEX_COLS]
 
@@ -256,6 +257,7 @@ class MSTLArimaResidualModel:
             cfg.feature_max_lag,
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
+            cfg.lags_by_col(),
         )
         feats_all = feats_all.reindex(columns=INDEX_COLS + self._feat_cols, fill_value=0.0)
         feats_all["_ts"] = feats_all["time_period"].apply(lambda p: period_to_timestamp(p, freq))

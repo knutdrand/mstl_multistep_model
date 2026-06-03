@@ -112,6 +112,7 @@ class ArimaBaseRFResidualModel:
             cfg.feature_max_lag,
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
+            cfg.lags_by_col(),
         )
         if cfg.irs_column and cfg.irs_features:
             irs, irs_cols = build_irs_features(
@@ -180,6 +181,7 @@ class ArimaBaseRFResidualModel:
             cfg.feature_max_lag,
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
+            cfg.lags_by_col(),
         )
         if cfg.irs_column and cfg.irs_features:
             irs, _ = build_irs_features(
