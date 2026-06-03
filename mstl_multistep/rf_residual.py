@@ -109,6 +109,8 @@ class ArimaBaseRFResidualModel:
         cfg = self.cfg
         self._freq = detect_frequency(historic_df)
         self._season_lengths = self._season_lengths_for(self._freq)
+        if cfg.em_iterations and cfg.em_iterations > 1:
+            return self._fit_em(historic_df)
         target = cfg.target_variable
 
         deseason, _ = dec.decompose_panel(
@@ -178,6 +180,8 @@ class ArimaBaseRFResidualModel:
         if self._rf is None:
             raise RuntimeError("Call fit() before predict()")
         cfg = self.cfg
+        if cfg.em_iterations and cfg.em_iterations > 1:
+            return self._predict_em(historic_df, future_df)
         freq = self._freq
         target = cfg.target_variable
         rng = np.random.default_rng(cfg.random_seed)
@@ -257,6 +261,135 @@ class ArimaBaseRFResidualModel:
             if cfg.discretize_samples:
                 final = rng.poisson(final).astype(float)
 
+            for step in range(h):
+                row = {"time_period": times[step], "location": loc_str}
+                for i, v in enumerate(final[step]):
+                    row[f"sample_{i}"] = float(v)
+                rows.append(row)
+
+        sample_cols = [f"sample_{i}" for i in range(cfg.n_samples)]
+        return pd.DataFrame(rows)[INDEX_COLS + sample_cols]
+
+    # -- EM / backfitting variant (em_iterations > 1) ----------------------
+
+    def _cov_features(self, historic_df, future_df):
+        """Covariate + IRS feature frame (no target lags — EM keeps predict non-circular)."""
+        cfg = self.cfg
+        feats = build_model_features(
+            historic_df, future_df, self.feature_columns, self._freq,
+            self._season_lengths, cfg.feature_min_lag, cfg.feature_max_lag,
+            cfg.use_location_dummies, cfg.deseasonalize_covariates, cfg.lags_by_col(),
+        )
+        if cfg.irs_column and cfg.irs_features:
+            irs, irs_cols = build_irs_features(
+                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
+            )
+            feats = feats.merge(irs, on=INDEX_COLS, how="left")
+            for c in irs_cols:
+                feats[c] = feats[c].fillna(0.0)
+        return feats
+
+    def _new_rf(self, oob: bool):
+        cfg = self.cfg
+        return RandomForestRegressor(
+            n_estimators=cfg.rf.n_estimators, max_depth=cfg.rf.max_depth,
+            min_samples_leaf=cfg.rf.min_samples_leaf, max_features=cfg.rf.max_features,
+            random_state=cfg.rf.random_state, n_jobs=-1, bootstrap=True, oob_score=oob,
+        )
+
+    def _fit_em(self, historic_df: pd.DataFrame) -> "ArimaBaseRFResidualModel":
+        cfg = self.cfg
+        target = cfg.target_variable
+        if cfg.rf_target_lags:
+            raise ValueError("em_iterations>1 requires rf_target_lags=0")
+
+        feats = self._cov_features(historic_df, None)
+        self._cov_cols = [c for c in feats.columns if c not in INDEX_COLS]
+        self._tgt_cols = []
+        self._feat_cols = self._cov_cols
+
+        base = historic_df[INDEX_COLS].copy()
+        base["_L"] = np.where(
+            cfg.log_transform,
+            np.log1p(np.clip(pd.to_numeric(historic_df[target], errors="coerce"), 0, None)),
+            pd.to_numeric(historic_df[target], errors="coerce"),
+        )
+        design = feats.merge(base, on=INDEX_COLS, how="left")
+        design["_ts"] = design["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
+        X = np.nan_to_num(design[self._cov_cols].to_numpy(dtype=float))
+        Xnan = design[self._cov_cols].to_numpy(dtype=float)
+        Lvec = design["_L"].to_numpy(dtype=float)
+        n = len(design)
+
+        loc_pos: dict[str, np.ndarray] = {}
+        for loc, g in design.sort_values(["location", "_ts"]).groupby("location", sort=False):
+            loc_pos[str(loc)] = g.index.to_numpy()
+
+        C = np.zeros(n)
+        rf = None
+        K = int(cfg.em_iterations)
+        for it in range(K):
+            resid_target = np.full(n, np.nan)
+            for loc, pos in loc_pos.items():
+                Lc = Lvec[pos] - C[pos]
+                decomp = dec.decompose(Lc, self._season_lengths)
+                Dclean = Lc - dec.seasonal_component(decomp)
+                A, _, _ = self._arima(Dclean, h=1, want_fitted=True)
+                resid_target[pos] = (Dclean - A) + C[pos]   # = L - S - A
+            mask = np.isfinite(resid_target) & ~np.isnan(Xnan).any(axis=1)
+            last = it == K - 1
+            rf = self._new_rf(oob=not last)
+            rf.fit(X[mask], resid_target[mask])
+            if not last:
+                oob = np.full(n, np.nan)
+                oob[np.where(mask)[0]] = rf.oob_prediction_
+                newC = np.where(np.isfinite(oob), oob, rf.predict(X))
+                C = cfg.em_damping * newC + (1.0 - cfg.em_damping) * C
+        self._rf = rf
+        return self
+
+    def _predict_em(self, historic_df: pd.DataFrame, future_df: pd.DataFrame) -> pd.DataFrame:
+        cfg = self.cfg
+        target = cfg.target_variable
+        rng = np.random.default_rng(cfg.random_seed)
+
+        feats_all = self._cov_features(historic_df, future_df)
+        feats_all = feats_all.reindex(columns=INDEX_COLS + self._cov_cols, fill_value=0.0)
+        Call = self._rf.predict(np.nan_to_num(feats_all[self._cov_cols].to_numpy(dtype=float)))
+        cmap = {
+            (str(l), str(t)): c
+            for l, t, c in zip(feats_all["location"], feats_all["time_period"], Call)
+        }
+
+        hist = historic_df.copy()
+        hist["_ts"] = hist["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
+        future = future_df.copy()
+        future["_ts"] = future["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
+
+        rows = []
+        for loc, fg in future.groupby("location", sort=False):
+            loc_str = str(loc)
+            fg = fg.sort_values("_ts")
+            times = fg["time_period"].astype(str).tolist()
+            h = len(fg)
+            hg = hist[hist["location"].astype(str) == loc_str].sort_values("_ts")
+            y = pd.to_numeric(hg[target], errors="coerce").to_numpy(dtype=float)
+            L = np.log1p(np.clip(y, 0, None)) if cfg.log_transform else y
+            C_hist = np.array([cmap.get((loc_str, str(t)), 0.0) for t in hg["time_period"]])
+            Lc = L - C_hist
+            decomp = dec.decompose(Lc, self._season_lengths)
+            Dclean = Lc - dec.seasonal_component(decomp)
+            _, mean_h, sigma_h = self._arima(Dclean, h=h, want_fitted=False)
+            seasonal = dec.extrapolate_seasonal(decomp, self._season_lengths, h)
+            C_fut = np.array([cmap.get((loc_str, t), 0.0) for t in times])
+            arima_draws = rng.normal(mean_h[:, None], sigma_h[:, None], size=(h, cfg.n_samples))
+
+            final = seasonal[:, None] + arima_draws + C_fut[:, None]
+            if cfg.log_transform:
+                final = np.expm1(final)
+            final = np.clip(final, a_min=0.0, a_max=None)
+            if cfg.discretize_samples:
+                final = rng.poisson(final).astype(float)
             for step in range(h):
                 row = {"time_period": times[step], "location": loc_str}
                 for i, v in enumerate(final[step]):

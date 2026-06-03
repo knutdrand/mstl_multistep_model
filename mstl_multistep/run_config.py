@@ -102,6 +102,16 @@ class RunConfig(BaseModel):
     # mode's MultistepModel uses.
     rf_target_lags: int = 0
 
+    # EM / backfitting iterations for rf_residual (1 = current single forward pass,
+    # exactly reproducible). When >1, alternately: remove the RF covariate effect
+    # from the signal, re-run MSTL+ARIMA on the cleaned series, then re-fit the RF
+    # on (signal - seasonal - ARIMA). ARIMA's sigma is naturally re-estimated on the
+    # covariate-cleaned residual. The RF covariate effect is formed out-of-bag during
+    # iterations so it does not corrupt the re-decomposition. em_damping in [0,1]
+    # blends new/old covariate estimates (1 = full update). Requires rf_target_lags=0.
+    em_iterations: int = 1
+    em_damping: float = 1.0
+
     # Output post-processing
     discretize_samples: bool = False
     random_seed: int = 42
