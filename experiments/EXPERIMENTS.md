@@ -48,3 +48,4 @@ experiments/run_eval.sh config_irs_leaf3.yaml irs_leaf3      # -> output/irs_lea
 chap export-metrics --input-files output/irs_baseline.nc --input-files output/irs_leaf3.nc \
   --output-file experiments/comparison.csv
 ```
+| 9 | exp/per-covariate-lags @9d49cd6 | **code** | per-covariate lags: rainfall [1,6], humidity [1,4], temp [1,2] (on exp7) | **0.3217** | 83.8 | 113.7 | 0.764 / 0.482 | **best log-CRPS** — but crps/mae regress ~0.6% (log-scale vs raw-scale trade-off) |
