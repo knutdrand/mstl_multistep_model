@@ -1,0 +1,5 @@
+filename,model_name,model_version,crps_log1p,crps
+h12_baseline.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.5136602712553657,96.70380739631534
+h12_irs_features.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.5131765283607261,95.75958072053034
+h12_percov_lags.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.5120377190338307,95.77649347507918
+h12_tgtlag3.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.5033151005150479,95.14337076849723

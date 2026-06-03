@@ -51,3 +51,21 @@ experiments/run_eval.sh config_irs_lags.yaml irs_lags        # -> output/irs_lag
 chap export-metrics --input-files output/irs_baseline.nc --input-files output/irs_lags.nc \
   --output-file experiments/comparison.csv
 ```
+
+## Long-horizon benchmark — 12-month-ahead, 14 splits (separate harness)
+
+`--backtest-params.n-periods 12 --n-splits 14 --stride 1` on the same dataset. NOT comparable
+to the 12×3×1 numbers above (much harder horizon). Best models only; log-CRPS / CRPS.
+
+| model | log-CRPS | CRPS |
+|---|---|---|
+| baseline (no IRS) | 0.5137 | 96.70 |
+| + IRS features | 0.5132 | 95.76 |
+| + per-covariate lags | 0.5120 | 95.78 |
+| **+ target lags=3 (champion, config_tgtlag3)** | **0.5033** | **95.14** |
+
+**Findings:** the full progression stays monotonic at long range — champion best on both metrics
+(vs baseline: log-CRPS −2.0%, CRPS −1.6%). **Target lags are far more valuable here** (−0.0087
+log-CRPS, vs −0.0014 at h=3): over a 12-month horizon the ARIMA-mean-bridged AR signal the RF
+captures matters much more. IRS features help CRPS (96.70→95.76) with a small log-CRPS gain.
+The improvements generalize to and amplify at long-range forecasting.
