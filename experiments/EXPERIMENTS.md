@@ -22,6 +22,7 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
 | 6 | exp/add-vegetation @afb9040 | config | + ndvi, evi (deseasonalized) covariates | 0.3221 | 83.9 | 113.9 | 0.761 / 0.481 | flat on log-CRPS, **worse** crps/mae — veg adds point noise |
 | 7 | exp/rf-leaf3 @f29393c | config | RF min_samples_leaf 5 → 3 (on exp2) | **0.3221** | **83.2** | **113.0** | 0.762 / 0.482 | **best** — log-CRPS tied w/ exp2 but crps/mae better, no regression |
 | 8 | exp/rf-leaf2 @77f1f41 | config | RF min_samples_leaf 3 → 2 (on exp7) | 0.3225 | 82.9 | 112.5 | 0.761 / 0.481 | regressed on log-CRPS — leaf<3 overfits log-scale tails; crps/mae keep dropping |
+| 9 | exp/per-covariate-lags @9d49cd6 | **code** | per-covariate lags: rainfall [1,6], humidity [1,4], temp [1,2] (on exp7) | **0.3217** | 83.8 | 113.7 | 0.764 / 0.482 | **CHAMPION** ✅ best log-CRPS (−1.1% vs baseline); crps/mae regress ~0.6% (log-scale vs raw-scale trade-off, accepted) |
 
 ## Outcome
 
@@ -31,10 +32,12 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
   *known* future covariate) lowered log-CRPS from **0.3253 → 0.3222** (−0.0031, −0.95%).
   The naive config raw-lag path (exp 1) did **not** — the sparse column is ~all zeros
   inside a 1–3 month lag window.
-- **Champion = exp 7** (`exp/rf-leaf3`): IRS features + `min_samples_leaf=3`. log-CRPS
-  0.3221 (tied with exp 2 within noise) with the best crps (83.2) and mae (113.0). The
-  leaf=3 gain over exp 2 on log-CRPS is within noise; the durable improvement is the IRS
-  features.
+- **Champion = exp 9** (`exp/per-covariate-lags`, tag `best/per-covariate-lags`): IRS
+  features + `min_samples_leaf=3` + per-covariate lags (rainfall [1,6], humidity [1,4],
+  temp [1,2]). **log-CRPS 0.3217 — best of the session, −1.1% vs baseline.** Trades ~0.6%
+  on crps/mae (longer moisture lags help log-scale small-count calibration at a small cost
+  to raw-count accuracy); accepted since log-CRPS is the primary metric. The intermediate
+  exp 7 (`exp/rf-leaf3`) remains the best *balanced* config (0.3221, best crps/mae).
 - **Negative results:** decay half-life is insensitive (3); the full 4-feature IRS set
   beats a subset (4); global sigma inflation fixes coverage but hurts log-CRPS (5);
   vegetation indices add point-forecast noise (6); `min_samples_leaf<3` overfits the
@@ -43,9 +46,8 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
 ## Reproduce the champion
 
 ```bash
-git checkout exp/rf-leaf3
-experiments/run_eval.sh config_irs_leaf3.yaml irs_leaf3      # -> output/irs_leaf3.nc
-chap export-metrics --input-files output/irs_baseline.nc --input-files output/irs_leaf3.nc \
+git checkout exp/per-covariate-lags
+experiments/run_eval.sh config_irs_lags.yaml irs_lags        # -> output/irs_lags.nc
+chap export-metrics --input-files output/irs_baseline.nc --input-files output/irs_lags.nc \
   --output-file experiments/comparison.csv
 ```
-| 9 | exp/per-covariate-lags @9d49cd6 | **code** | per-covariate lags: rainfall [1,6], humidity [1,4], temp [1,2] (on exp7) | **0.3217** | 83.8 | 113.7 | 0.764 / 0.482 | **best log-CRPS** — but crps/mae regress ~0.6% (log-scale vs raw-scale trade-off) |
