@@ -42,8 +42,20 @@ class ArimaBaseRFResidualModel:
         self.feature_columns = list(feature_columns)
         self._rf: RandomForestRegressor | None = None
         self._feat_cols: list[str] | None = None
+        self._cov_cols: list[str] | None = None  # covariate/IRS/dummy features
+        self._tgt_cols: list[str] = []           # deseasonalized-target lag features
         self._freq: str | None = None
         self._season_lengths: list[int] | None = None
+
+    def _target_lag_frame(self, deseason: pd.DataFrame, target: str, k: int) -> pd.DataFrame:
+        """``[*INDEX_COLS, tgt_lag1..tgt_lagk]`` of the deseasonalized target, per location."""
+        g = deseason.copy()
+        g["_ts"] = g["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
+        g = g.sort_values(["location", "_ts"])
+        out = g[INDEX_COLS].copy()
+        for j in range(1, k + 1):
+            out[f"tgt_lag{j}"] = g.groupby("location")[target].shift(j).to_numpy()
+        return out
 
     def _season_lengths_for(self, freq: str) -> list[int]:
         sl = (
@@ -121,7 +133,14 @@ class ArimaBaseRFResidualModel:
             feats = feats.merge(irs, on=INDEX_COLS, how="left")
             for c in irs_cols:
                 feats[c] = feats[c].fillna(0.0)
-        self._feat_cols = [c for c in feats.columns if c not in INDEX_COLS]
+        self._cov_cols = [c for c in feats.columns if c not in INDEX_COLS]
+
+        self._tgt_cols = []
+        if cfg.rf_target_lags > 0:
+            tl = self._target_lag_frame(deseason, target, cfg.rf_target_lags)
+            feats = feats.merge(tl, on=INDEX_COLS, how="left")
+            self._tgt_cols = [f"tgt_lag{j}" for j in range(1, cfg.rf_target_lags + 1)]
+        self._feat_cols = self._cov_cols + self._tgt_cols
 
         deseason = deseason.copy()
         deseason["_ts"] = deseason["time_period"].apply(
@@ -188,7 +207,7 @@ class ArimaBaseRFResidualModel:
                 historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
             )
             feats_all = feats_all.merge(irs, on=INDEX_COLS, how="left")
-        feats_all = feats_all.reindex(columns=INDEX_COLS + self._feat_cols, fill_value=0.0)
+        feats_all = feats_all.reindex(columns=INDEX_COLS + self._cov_cols, fill_value=0.0)
         feats_all["_ts"] = feats_all["time_period"].apply(lambda p: period_to_timestamp(p, freq))
 
         future = future_df.copy()
@@ -214,9 +233,20 @@ class ArimaBaseRFResidualModel:
             fut_feat = (
                 feats_all[feats_all["location"].astype(str) == loc_str]
                 .sort_values("_ts")
-                .tail(h)[self._feat_cols]
+                .tail(h)[self._cov_cols]
                 .to_numpy(dtype=float)
             )
+            if self._tgt_cols:
+                # deseasonalized history + ARIMA mean as a non-recursive bridge for
+                # future lags; tgt_lag{j} at future step t = series[len_hist + t - j].
+                s = np.concatenate([y_hist, mean_h])
+                lh = len(y_hist)
+                tl = np.empty((h, len(self._tgt_cols)), dtype=float)
+                for t in range(h):
+                    for ji, j in enumerate(range(1, len(self._tgt_cols) + 1)):
+                        idx = lh + t - j
+                        tl[t, ji] = s[idx] if idx >= 0 else np.nan
+                fut_feat = np.hstack([fut_feat, tl])
             rf_resid = self._rf.predict(np.nan_to_num(fut_feat))  # (h,)
             seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
 

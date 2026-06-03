@@ -94,6 +94,14 @@ class RunConfig(BaseModel):
     irs_features: list[str] = Field(default_factory=list)
     irs_halflife: float = 4.0
 
+    # Number of lagged deseasonalized-target values fed to the rf_residual RF as
+    # extra features (0 = none, the default — ARIMA alone carries the AR dynamics).
+    # Future lags that fall in the forecast window are filled with the ARIMA mean
+    # forecast (non-recursive bridge), so the RF can pick up residual autocorrelation
+    # the linear ARIMA misses. Distinct from n_target_lags, which only the multistep
+    # mode's MultistepModel uses.
+    rf_target_lags: int = 0
+
     # Output post-processing
     discretize_samples: bool = False
     random_seed: int = 42
