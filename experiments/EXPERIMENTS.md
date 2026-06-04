@@ -123,3 +123,15 @@ per-horizon + target-lags combination remains an untested long-horizon idea.
 
 **`config_tgtlag3` (IRS features + per-covariate lags + min_samples_leaf=3 + rf_target_lags=3):
 log-CRPS 0.3203, CRPS 82.97.** All further h=3 improvements measured against this.
+
+## Target-lag source: ARIMA residual R vs deseasonalized target D (h=3)
+
+| model | log-CRPS | CRPS |
+|---|---|---|
+| **champion (lag D, deseason)** | **0.3203** | **82.97** |
+| lag R = D−A (rf_target_lag_source=residual) | 0.3215 | 83.58 |
+
+**Negative result.** Lagging the ARIMA residual R is worse on both metrics. ARIMA whitens R well
+enough that its lags carry little signal, whereas lagged D gives the RF the recent level/trend
+(which correlates with the residual). The `deseason` source is validated; `rf_target_lag_source`
+left inert at default `deseason`. Champion unchanged.
