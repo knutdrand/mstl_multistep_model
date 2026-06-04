@@ -47,14 +47,14 @@ class ArimaBaseRFResidualModel:
         self._freq: str | None = None
         self._season_lengths: list[int] | None = None
 
-    def _target_lag_frame(self, deseason: pd.DataFrame, target: str, k: int) -> pd.DataFrame:
-        """``[*INDEX_COLS, tgt_lag1..tgt_lagk]`` of the deseasonalized target, per location."""
-        g = deseason.copy()
+    def _target_lag_frame(self, frame: pd.DataFrame, value_col: str, k: int) -> pd.DataFrame:
+        """``[*INDEX_COLS, tgt_lag1..tgt_lagk]`` of ``value_col`` (D or ARIMA residual), per location."""
+        g = frame.copy()
         g["_ts"] = g["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
         g = g.sort_values(["location", "_ts"])
         out = g[INDEX_COLS].copy()
         for j in range(1, k + 1):
-            out[f"tgt_lag{j}"] = g.groupby("location")[target].shift(j).to_numpy()
+            out[f"tgt_lag{j}"] = g.groupby("location")[value_col].shift(j).to_numpy()
         return out
 
     def _season_lengths_for(self, freq: str) -> list[int]:
@@ -142,13 +142,6 @@ class ArimaBaseRFResidualModel:
             feats = feats.merge(seas, on=INDEX_COLS, how="left")
         self._cov_cols = [c for c in feats.columns if c not in INDEX_COLS]
 
-        self._tgt_cols = []
-        if cfg.rf_target_lags > 0:
-            tl = self._target_lag_frame(deseason, target, cfg.rf_target_lags)
-            feats = feats.merge(tl, on=INDEX_COLS, how="left")
-            self._tgt_cols = [f"tgt_lag{j}" for j in range(1, cfg.rf_target_lags + 1)]
-        self._feat_cols = self._cov_cols + self._tgt_cols
-
         deseason = deseason.copy()
         deseason["_ts"] = deseason["time_period"].apply(
             lambda p: period_to_timestamp(p, self._freq)
@@ -164,6 +157,17 @@ class ArimaBaseRFResidualModel:
             blk["_resid"] = y - fitted  # keeps NaN where y was NaN
             resid_blocks.append(blk)
         resid_df = pd.concat(resid_blocks, ignore_index=True)
+
+        # Target lags: of the deseasonalized target D, or of the ARIMA residual R.
+        self._tgt_cols = []
+        if cfg.rf_target_lags > 0:
+            if cfg.rf_target_lag_source == "residual":
+                tl = self._target_lag_frame(resid_df, "_resid", cfg.rf_target_lags)
+            else:
+                tl = self._target_lag_frame(deseason, target, cfg.rf_target_lags)
+            feats = feats.merge(tl, on=INDEX_COLS, how="left")
+            self._tgt_cols = [f"tgt_lag{j}" for j in range(1, cfg.rf_target_lags + 1)]
+        self._feat_cols = self._cov_cols + self._tgt_cols
 
         design = feats.merge(resid_df, on=INDEX_COLS, how="left")
         X = design[self._feat_cols].to_numpy(dtype=float)
@@ -239,7 +243,8 @@ class ArimaBaseRFResidualModel:
                 .sort_values("_ts")[target]
                 .to_numpy(dtype=float)
             )
-            _, mean_h, sigma_h = self._arima(y_hist, h=h, want_fitted=False)
+            want_fitted = bool(self._tgt_cols) and cfg.rf_target_lag_source == "residual"
+            fitted_h, mean_h, sigma_h = self._arima(y_hist, h=h, want_fitted=want_fitted)
             arima_draws = rng.normal(
                 loc=mean_h[:, None], scale=sigma_h[:, None], size=(h, cfg.n_samples)
             )
@@ -251,9 +256,14 @@ class ArimaBaseRFResidualModel:
                 .to_numpy(dtype=float)
             )
             if self._tgt_cols:
-                # deseasonalized history + ARIMA mean as a non-recursive bridge for
-                # future lags; tgt_lag{j} at future step t = series[len_hist + t - j].
-                s = np.concatenate([y_hist, mean_h])
+                # Non-recursive bridge for future lags; tgt_lag{j} at step t = series[lh+t-j].
+                if cfg.rf_target_lag_source == "residual":
+                    # lag the ARIMA residual R = D - fitted; future residuals ~ 0.
+                    r_hist = y_hist - fitted_h
+                    s = np.concatenate([r_hist, np.zeros(h)])
+                else:
+                    # lag the deseasonalized target D; bridge future with the ARIMA mean.
+                    s = np.concatenate([y_hist, mean_h])
                 lh = len(y_hist)
                 tl = np.empty((h, len(self._tgt_cols)), dtype=float)
                 for t in range(h):

@@ -101,6 +101,12 @@ class RunConfig(BaseModel):
     # the linear ARIMA misses. Distinct from n_target_lags, which only the multistep
     # mode's MultistepModel uses.
     rf_target_lags: int = 0
+    # What the rf_target_lags feature lags: "deseason" = the deseasonalized log-target
+    # D (the series ARIMA forecasts; overlaps ARIMA's own AR terms), or "residual" =
+    # the ARIMA residual R = D - A (the autocorrelation ARIMA left behind; complementary
+    # rather than redundant). Future residual lags are bridged with 0 (ARIMA residual is
+    # mean-zero out of sample); deseason lags are bridged with the ARIMA mean forecast.
+    rf_target_lag_source: Literal["deseason", "residual"] = "deseason"
 
     # Fourier seasonal features (sin/cos of the annual cycle) added to the rf_residual
     # RF at lag 0. 0 = none (default) — the model normally relies on MSTL to remove
