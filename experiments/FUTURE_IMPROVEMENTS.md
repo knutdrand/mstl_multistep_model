@@ -68,3 +68,29 @@ stabilise both the RF residual and the variance.
 Each is one comparable change on the frozen harness; expect #1–#3 to move log-CRPS most because
 they attack the measured biases directly, whereas covariate tweaks (exp 5/6) and HPO have already
 shown flat/diminishing returns.
+
+---
+
+## Next directions (post-session synthesis)
+
+The model is at the **log-CRPS optimum for its architecture** — every tuning/recalibration lever
+is now flat or negative (debias, pseudocount, sigma, discretize, empirical residuals, EM, seasonal
+features, vegetation, lag-window HPO). Only levers that gave the RF new *information* moved the
+metric (IRS features, target lags). Further gains need **architectural** change, not knobs.
+
+**Tier 1 (most promising, untested):**
+- **Per-horizon / direct multi-step residual modeling.** Horizon degradation is real (log-CRPS
+  0.39→0.54, h=1→3) and target lags helped 6× more at h=12 — the residual structure differs by
+  lead time, but one RF (trained on ~1-step in-sample residuals) corrects all horizons. Train
+  horizon-aware residuals (multi-origin rolling residuals + horizon feature, or H separate models).
+  **← prototyping now.**
+- **Target-lag variants (cheap):** recursive target lags; lag the *ARIMA residual* itself.
+
+**Tier 2 (the real remaining structural error):**
+- **Upper tail / outbreaks.** Right tail uncaptured (12.8%>q90, 3.6%>q99); symmetric sigma failed.
+  Swap the point-RF residual for a **quantile gradient-boosting** model → asymmetric residual
+  distribution, attacks point + tail together.
+- **Metric fork / ensemble.** per-capita rate wins CRPS+coverage decisively; blend it with the
+  log-CRPS champion (different errors) for a possible Pareto gain.
+
+**Tier 3:** district-level partial pooling instead of 406 one-hot dummies; alt rainfall sources.
