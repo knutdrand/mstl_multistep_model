@@ -85,3 +85,18 @@ residual RF. Full frozen harness, log-CRPS / CRPS.
 confirming the model's design choice to omit them: MSTL removes seasonality cleanly enough that
 the ARIMA residual has no exploitable seasonal structure, so the sin/cos terms only add overfit
 noise. `seasonal_fourier_order` left inert by default (0).
+
+## Per-horizon residual prototype (FUTURE #1) — subset screen
+
+Multi-horizon training residuals + horizon feature (rf_horizon_feature), vs baseline (one RF on
+1-step residuals), on the per-covariate-lags base (rf_target_lags=0). 68-location subset × 6 splits.
+
+| forecast horizon | baseline log-CRPS / cov | per-horizon log-CRPS / cov |
+|---|---|---|
+| h=3 | **0.3038 / 0.792** | 0.3126 / 0.772 |
+| h=12 | 0.4348 / 0.755 | **0.4268 / 0.768** |
+
+**Horizon-dependent: hurts at h=3, helps at h=12** (−0.008 log-CRPS + better coverage). The
+single-RF baseline trains on ~1-step residuals; applied to long-horizon forecasts (ARIMA reverted
+to mean) it under-corrects, and the horizon-aware RF fixes it. At h=3 there is no mismatch and the
+noisier multi-origin training residuals just add noise. Confirming on the full h=12 harness next.
