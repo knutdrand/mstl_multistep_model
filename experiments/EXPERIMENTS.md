@@ -100,3 +100,26 @@ Multi-horizon training residuals + horizon feature (rf_horizon_feature), vs base
 single-RF baseline trains on ~1-step residuals; applied to long-horizon forecasts (ARIMA reverted
 to mean) it under-corrects, and the horizon-aware RF fixes it. At h=3 there is no mismatch and the
 noisier multi-origin training residuals just add noise. Confirming on the full h=12 harness next.
+
+### Per-horizon — full h=12 confirmation, then SHELVED
+
+Full h=12/14-split harness (per-horizon on the per-cov-lags base, rf_target_lags=0):
+
+| h=12 model | log-CRPS | CRPS | cov |
+|---|---|---|---|
+| per-cov lags | 0.5120 | 95.78 | 0.720 |
+| champion tgtlag3 | 0.5033 | **95.14** | 0.727 |
+| **per-horizon** | **0.4980** | 96.77 | 0.732 |
+
+Per-horizon (no target lags) **beats the champion on log-CRPS at h=12** (0.4980 vs 0.5033, +coverage)
+but is worse on CRPS. Combined with the screen (hurts at h=3: 0.3126 vs 0.3038), per-horizon is a
+**long-horizon-only** technique.
+
+**Decision: SHELVED.** h=3 (12×3×1) is the main harness, where per-horizon hurts. Code left inert
+by default (`rf_horizon_feature=False`). Revisit only for long-range (h≫3) forecasting; the
+per-horizon + target-lags combination remains an untested long-horizon idea.
+
+## Main-harness champion (h=3, reaffirmed)
+
+**`config_tgtlag3` (IRS features + per-covariate lags + min_samples_leaf=3 + rf_target_lags=3):
+log-CRPS 0.3203, CRPS 82.97.** All further h=3 improvements measured against this.
