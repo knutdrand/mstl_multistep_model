@@ -111,6 +111,8 @@ class ArimaBaseRFResidualModel:
         self._season_lengths = self._season_lengths_for(self._freq)
         if cfg.em_iterations and cfg.em_iterations > 1:
             return self._fit_em(historic_df)
+        if cfg.rf_horizon_feature:
+            return self._fit_horizon(historic_df)
         target = cfg.target_variable
 
         deseason, _ = dec.decompose_panel(
@@ -185,6 +187,8 @@ class ArimaBaseRFResidualModel:
         cfg = self.cfg
         if cfg.em_iterations and cfg.em_iterations > 1:
             return self._predict_em(historic_df, future_df)
+        if cfg.rf_horizon_feature:
+            return self._predict_horizon(historic_df, future_df)
         freq = self._freq
         target = cfg.target_variable
         rng = np.random.default_rng(cfg.random_seed)
@@ -267,6 +271,118 @@ class ArimaBaseRFResidualModel:
             if cfg.discretize_samples:
                 final = rng.poisson(final).astype(float)
 
+            for step in range(h):
+                row = {"time_period": times[step], "location": loc_str}
+                for i, v in enumerate(final[step]):
+                    row[f"sample_{i}"] = float(v)
+                rows.append(row)
+
+        sample_cols = [f"sample_{i}" for i in range(cfg.n_samples)]
+        return pd.DataFrame(rows)[INDEX_COLS + sample_cols]
+
+    # -- Per-horizon residual variant (rf_horizon_feature) -----------------
+
+    def _deseason_by_loc(self, df):
+        """{loc: (times list, D array)} deseasonalized target, time-sorted."""
+        target = self.cfg.target_variable
+        deseason, decomps = dec.decompose_panel(
+            df, self._freq, target, self._season_lengths, self.cfg.log_transform
+        )
+        deseason["_ts"] = deseason["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
+        out = {}
+        for loc, g in deseason.groupby("location", sort=False):
+            g = g.sort_values("_ts")
+            out[str(loc)] = (g["time_period"].astype(str).tolist(), g[target].to_numpy(dtype=float))
+        return out, decomps
+
+    def _fit_horizon(self, historic_df: pd.DataFrame) -> "ArimaBaseRFResidualModel":
+        cfg = self.cfg
+        if cfg.rf_target_lags:
+            raise ValueError("rf_horizon_feature requires rf_target_lags=0")
+        H = int(cfg.rf_horizon_max)
+
+        feats = self._cov_features(historic_df, None)
+        self._cov_cols = [c for c in feats.columns if c not in INDEX_COLS]
+        self._tgt_cols = []
+        self._feat_cols = self._cov_cols + ["_horizon"]
+        fmap = {
+            (str(l), str(t)): row
+            for l, t, row in zip(
+                feats["location"], feats["time_period"],
+                feats[self._cov_cols].to_numpy(dtype=float),
+            )
+        }
+
+        ser, _ = self._deseason_by_loc(historic_df)
+        Xrows, yrows = [], []
+        for loc, (times, D) in ser.items():
+            T = len(D)
+            valid = [o for o in range(24, T) if np.isfinite(D[:o]).sum() >= 24]
+            for o in valid[-cfg.rf_horizon_origins:]:
+                _, mean_h, _ = self._arima(D[:o], h=H, want_fitted=False)
+                for hh in range(1, H + 1):
+                    ti = o + hh - 1
+                    if ti >= T or not np.isfinite(D[ti]):
+                        continue
+                    fr = fmap.get((loc, times[ti]))
+                    if fr is None:
+                        continue
+                    Xrows.append(np.concatenate([fr, [float(hh)]]))
+                    yrows.append(D[ti] - mean_h[hh - 1])
+        X = np.asarray(Xrows, dtype=float)
+        y = np.asarray(yrows, dtype=float)
+        mask = ~np.isnan(X).any(axis=1) & np.isfinite(y)
+        self._rf = RandomForestRegressor(
+            n_estimators=cfg.rf.n_estimators, max_depth=cfg.rf.max_depth,
+            min_samples_leaf=cfg.rf.min_samples_leaf, max_features=cfg.rf.max_features,
+            random_state=cfg.rf.random_state, n_jobs=-1,
+        )
+        self._rf.fit(X[mask], y[mask])
+        return self
+
+    def _predict_horizon(self, historic_df: pd.DataFrame, future_df: pd.DataFrame) -> pd.DataFrame:
+        cfg = self.cfg
+        freq = self._freq
+        rng = np.random.default_rng(cfg.random_seed)
+
+        feats_all = self._cov_features(historic_df, future_df)
+        feats_all = feats_all.reindex(columns=INDEX_COLS + self._cov_cols, fill_value=0.0)
+        cmap = {
+            (str(l), str(t)): row
+            for l, t, row in zip(
+                feats_all["location"], feats_all["time_period"],
+                feats_all[self._cov_cols].to_numpy(dtype=float),
+            )
+        }
+        ser, decomps = self._deseason_by_loc(historic_df)
+
+        future = future_df.copy()
+        future["_ts"] = future["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+        rows = []
+        for loc, fg in future.groupby("location", sort=False):
+            loc_str = str(loc)
+            fg = fg.sort_values("_ts")
+            times = fg["time_period"].astype(str).tolist()
+            h = len(fg)
+            y_hist = ser.get(loc_str, ([], np.array([])))[1]
+            _, mean_h, sigma_h = self._arima(y_hist, h=h, want_fitted=False)
+            seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
+            arima_draws = rng.normal(mean_h[:, None], sigma_h[:, None], size=(h, cfg.n_samples))
+
+            rf_resid = np.zeros(h)
+            for step in range(h):
+                fr = cmap.get((loc_str, times[step]))
+                if fr is None:
+                    continue
+                x = np.concatenate([fr, [float(step + 1)]])
+                rf_resid[step] = self._rf.predict(np.nan_to_num(x)[None, :])[0]
+
+            final = seasonal[:, None] + arima_draws + rf_resid[:, None]
+            if cfg.log_transform:
+                final = np.expm1(final)
+            final = np.clip(final, a_min=0.0, a_max=None)
+            if cfg.discretize_samples:
+                final = rng.poisson(final).astype(float)
             for step in range(h):
                 row = {"time_period": times[step], "location": loc_str}
                 for i, v in enumerate(final[step]):

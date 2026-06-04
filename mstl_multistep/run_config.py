@@ -108,6 +108,17 @@ class RunConfig(BaseModel):
     # structure the RF could mop up. K adds 2K columns (sin_k, cos_k, k=1..K).
     seasonal_fourier_order: int = 0
 
+    # Per-horizon residual modelling (rf_residual). The default RF trains on ~1-step
+    # in-sample ARIMA residuals but is applied to h-step forecasts (ARIMA reverted to
+    # mean) -> under-corrects at long horizons. When True, generate multi-horizon
+    # training residuals (truth - ARIMA h-step forecast) at rf_horizon_origins rolling
+    # origins per location, for horizons 1..rf_horizon_max, and add horizon as an RF
+    # feature. Set rf_horizon_max to the forecast n-periods. Requires rf_target_lags=0,
+    # em_iterations=1.
+    rf_horizon_feature: bool = False
+    rf_horizon_max: int = 3
+    rf_horizon_origins: int = 6
+
     # EM / backfitting iterations for rf_residual (1 = current single forward pass,
     # exactly reproducible). When >1, alternately: remove the RF covariate effect
     # from the signal, re-run MSTL+ARIMA on the cleaned series, then re-fit the RF
