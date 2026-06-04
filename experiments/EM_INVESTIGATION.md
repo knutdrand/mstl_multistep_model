@@ -55,8 +55,38 @@ RF so optimistic, but R on the residual is also in-sample 0.67, so the relative 
 5. Screen `em_iterations ∈ {1,2,3}` in-process on a location subset; confirm on the full frozen
    harness (log-CRPS + CRPS). Watch coverage closely.
 
-## Verdict
+## Verdict (pre-prototype)
 Worth prototyping. The headroom is real (strong ARIMA↔covariate competition), and the mechanism
-plausibly helps the mean and long-horizon forecasts. The decisive risk is **uncertainty handling** —
-the prototype must re-estimate σ on the cleaned residual, or EM will win on the mean and lose on
-log-CRPS like the other recalibration experiments.
+plausibly helps the mean and long-horizon forecasts. The decisive risk is **uncertainty handling**.
+
+---
+
+## RESULT — prototype built and tested: EM does NOT help (negative result)
+
+Prototype: `em_iterations`, `em_damping`, `em_sigma_scale` on the covariate+IRS RF (no target
+lags, so predict stays non-circular); each iteration removes the OOB RF covariate effect, re-runs
+MSTL+ARIMA on the cleaned signal, re-fits the RF. `em_iterations=1` = current path (untouched).
+
+Subset screen (102 locations × 8 splits), log-CRPS + coverage:
+
+| config | log-CRPS | cov 10–90 |
+|---|---|---|
+| **em=1 (current)** | **0.3005** | 0.798 |
+| em=2 damp=0.5 σ=1.2 (best EM) | 0.3042 | 0.790 |
+| em=2 damp=1.0 σ=1.0 | 0.3087 | 0.712 |
+| em=3 damp=1.0 σ=1.0 | 0.3103 | 0.700 |
+
+Two findings:
+1. **Coverage collapses** 0.80→~0.71 at em>1 — removing the covariate effect shrinks ARIMA's σ, but
+   the RF effect is added back as a deterministic point with no uncertainty → under-dispersion.
+2. **Re-inflating σ recovers coverage but not log-CRPS.** The best-calibrated EM (damp=0.5, σ=1.2)
+   reaches coverage 0.790 ≈ em=1's 0.798, yet log-CRPS is 0.3042 vs **0.3005** — still worse. So once
+   calibration is fixed, **the EM mean is simply no better than the single pass.** em=1 won all 7
+   comparisons; fewer iterations and more damping (both → em=1) always helped.
+
+**Conclusion.** The 80% ARIMA↔covariate overlap is *benign*: letting ARIMA take first claim of the
+autocorrelated covariate signal forecasts just as well as backfitting, and iterating only reshuffles
+variance between components (hurting calibration) without improving the mean. The single forward pass
+is already optimal for this model/data/metric. EM abandoned. The `em_*` code remains in the model,
+inert by default (`em_iterations=1`), in case a future dataset with stronger, less-autocorrelated
+covariate effects revisits it.
