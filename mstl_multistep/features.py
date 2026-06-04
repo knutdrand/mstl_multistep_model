@@ -1,18 +1,57 @@
 """Feature engineering for the deseasonalized trend model.
 
-Deliberately *omits* calendar (month sin/cos) features: the target the
+By default *omits* calendar (month sin/cos) features: the target the
 multistep model sees has already had its seasonality removed by MSTL, so
 calendar features would be redundant. We keep lagged covariates (when the
 user supplies any) and optional one-hot location columns so the pooled
 model retains per-series identity. Target lags are added by the
-``MultistepModel`` itself.
+``MultistepModel`` itself. Fourier seasonal features can be re-introduced
+explicitly via :func:`build_seasonal_features` (``seasonal_fourier_order``),
+since MSTL's seasonal-naive extrapolation can leave residual seasonality.
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
+from mstl_multistep.io_utils import period_to_timestamp
+
 INDEX_COLS = ["time_period", "location"]
+
+
+def build_seasonal_features(
+    historic_df: pd.DataFrame,
+    future_df: pd.DataFrame | None,
+    freq: str,
+    order: int,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Return ``([*INDEX_COLS, seas_sin1, seas_cos1, ...], cols)`` Fourier seasonal features.
+
+    Encodes the within-year phase of each period as ``order`` sin/cos harmonics of the
+    annual cycle (period 12 for monthly, 52 for weekly). Contemporaneous (lag 0); the
+    same calendar features apply to historic and future rows. Empty when ``order<=0``.
+    """
+    base = historic_df if future_df is None else pd.concat(
+        [historic_df, future_df], ignore_index=True
+    )
+    out = base[INDEX_COLS].copy()
+    if order <= 0:
+        return out, []
+    ts = base["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+    if str(freq).startswith("W"):
+        pos = ts.dt.isocalendar().week.astype(float) - 1.0
+        period = 52.0
+    else:
+        pos = ts.dt.month.astype(float) - 1.0
+        period = 12.0
+    cols = []
+    for k in range(1, order + 1):
+        ang = 2.0 * np.pi * k * pos / period
+        out[f"seas_sin{k}"] = np.sin(ang).to_numpy()
+        out[f"seas_cos{k}"] = np.cos(ang).to_numpy()
+        cols += [f"seas_sin{k}", f"seas_cos{k}"]
+    return out, cols
 
 
 def lag_covariates(

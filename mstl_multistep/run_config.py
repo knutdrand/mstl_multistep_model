@@ -102,6 +102,12 @@ class RunConfig(BaseModel):
     # mode's MultistepModel uses.
     rf_target_lags: int = 0
 
+    # Fourier seasonal features (sin/cos of the annual cycle) added to the rf_residual
+    # RF at lag 0. 0 = none (default) — the model normally relies on MSTL to remove
+    # seasonality, but the seasonal-naive extrapolation can leave residual seasonal
+    # structure the RF could mop up. K adds 2K columns (sin_k, cos_k, k=1..K).
+    seasonal_fourier_order: int = 0
+
     # EM / backfitting iterations for rf_residual (1 = current single forward pass,
     # exactly reproducible). When >1, alternately: remove the RF covariate effect
     # from the signal, re-run MSTL+ARIMA on the cleaned series, then re-fit the RF
