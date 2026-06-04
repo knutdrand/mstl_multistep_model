@@ -1,0 +1,3 @@
+filename,model_name,model_version,crps_log1p,crps
+irs_tgtlag3.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.3203280258940777,82.97205789777604
+quantile_resid.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.32244274454594424,84.66371681935311

@@ -135,3 +135,17 @@ log-CRPS 0.3203, CRPS 82.97.** All further h=3 improvements measured against thi
 enough that its lags carry little signal, whereas lagged D gives the RF the recent level/trend
 (which correlates with the residual). The `deseason` source is validated; `rf_target_lag_source`
 left inert at default `deseason`. Champion unchanged.
+
+## Quantile-GBM residual (FUTURE #1) — h=3
+
+| model | log-CRPS | CRPS | frac>q90 | frac>q99 |
+|---|---|---|---|---|
+| **champion (point RF + Gaussian, config_tgtlag3)** | **0.3203** | **82.97** | 0.111 | 0.031 |
+| quantile-GBM residual (config_quantile) | 0.3224 | 84.66 | 0.134 | 0.078 |
+
+**Negative on h=3.** Worse on log-CRPS, CRPS, and the upper tail it targeted. Caveats: (a) the
+inverse-CDF sampling clamps beyond the [0.05,0.95] level grid -> no mass above q95 -> q99 blows up
+(would need 0.01/0.99 levels + parametric tail extrapolation); (b) the heavy-tail problem is largely
+an h=12 phenomenon — the champion's h=3 tail is already near-nominal (0.111/0.031), so little headroom.
+`residual_quantile` left inert (False). Champion unchanged. Could be revisited for long-horizon
+(h=12) with proper tail extrapolation.
