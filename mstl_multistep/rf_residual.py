@@ -24,7 +24,7 @@ import logging
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from statsforecast.models import AutoARIMA
 
 from mstl_multistep import decomposition as dec
@@ -41,6 +41,7 @@ class ArimaBaseRFResidualModel:
         self.cfg = cfg
         self.feature_columns = list(feature_columns)
         self._rf: RandomForestRegressor | None = None
+        self._qmodels: dict | None = None  # {level: quantile GBM} for residual_quantile mode
         self._feat_cols: list[str] | None = None
         self._cov_cols: list[str] | None = None  # covariate/IRS/dummy features
         self._tgt_cols: list[str] = []           # deseasonalized-target lag features
@@ -174,6 +175,18 @@ class ArimaBaseRFResidualModel:
         yres = design["_resid"].to_numpy(dtype=float)
         mask = ~(np.isnan(X).any(axis=1) | np.isnan(yres))
 
+        if cfg.residual_quantile:
+            # Quantile GBMs on the ARIMA residual: one per level, for an asymmetric spread.
+            self._qmodels = {}
+            for q in cfg.residual_quantile_levels:
+                m = HistGradientBoostingRegressor(
+                    loss="quantile", quantile=q, max_iter=200, learning_rate=0.05,
+                    max_depth=None, random_state=cfg.rf.random_state,
+                )
+                m.fit(X[mask], yres[mask])
+                self._qmodels[float(q)] = m
+            return self
+
         self._rf = RandomForestRegressor(
             n_estimators=cfg.rf.n_estimators,
             max_depth=cfg.rf.max_depth,
@@ -186,7 +199,7 @@ class ArimaBaseRFResidualModel:
         return self
 
     def predict(self, historic_df: pd.DataFrame, future_df: pd.DataFrame) -> pd.DataFrame:
-        if self._rf is None:
+        if self._rf is None and self._qmodels is None:
             raise RuntimeError("Call fit() before predict()")
         cfg = self.cfg
         if cfg.em_iterations and cfg.em_iterations > 1:
@@ -271,10 +284,26 @@ class ArimaBaseRFResidualModel:
                         idx = lh + t - j
                         tl[t, ji] = s[idx] if idx >= 0 else np.nan
                 fut_feat = np.hstack([fut_feat, tl])
-            rf_resid = self._rf.predict(np.nan_to_num(fut_feat))  # (h,)
             seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
+            Xf = np.nan_to_num(fut_feat)
 
-            final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
+            if self._qmodels is not None:
+                # Asymmetric residual: inverse-CDF interpolation of predicted quantiles,
+                # added to the ARIMA mean; deviations from the median scale by sigma_h/sigma_1.
+                levels = np.array(sorted(self._qmodels), dtype=float)
+                Q = np.column_stack([self._qmodels[float(q)].predict(Xf) for q in levels])  # (h, L)
+                Q.sort(axis=1)  # enforce monotone quantiles (no crossing)
+                s1 = sigma_h[0] if sigma_h[0] > 0 else 1.0
+                u = rng.random((h, cfg.n_samples))
+                resid = np.empty((h, cfg.n_samples))
+                for t in range(h):
+                    med_t = np.interp(0.5, levels, Q[t])
+                    draws = np.interp(u[t], levels, Q[t])
+                    resid[t] = med_t + (draws - med_t) * (sigma_h[t] / s1)
+                final = seasonal[:, None] + mean_h[:, None] + resid  # (h, n)
+            else:
+                rf_resid = self._rf.predict(Xf)  # (h,)
+                final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
             if cfg.log_transform:
                 final = np.expm1(final)
             final = np.clip(final, a_min=0.0, a_max=None)

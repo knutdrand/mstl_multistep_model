@@ -114,6 +114,17 @@ class RunConfig(BaseModel):
     # structure the RF could mop up. K adds 2K columns (sin_k, cos_k, k=1..K).
     seasonal_fourier_order: int = 0
 
+    # Quantile-GBM residual (rf_residual). When True, replace the point-RF residual +
+    # symmetric Gaussian ARIMA spread with quantile gradient boosting on the ARIMA
+    # residual R at residual_quantile_levels: samples are drawn by inverse-CDF
+    # interpolation of the predicted residual quantiles (an asymmetric, skew-capable
+    # spread targeting the heavy right tail / outbreaks), added to the ARIMA mean.
+    # Horizon growth comes from scaling residual deviations by sigma_h/sigma_1.
+    residual_quantile: bool = False
+    residual_quantile_levels: list[float] = Field(
+        default_factory=lambda: [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95]
+    )
+
     # Per-horizon residual modelling (rf_residual). The default RF trains on ~1-step
     # in-sample ARIMA residuals but is applied to h-step forecasts (ARIMA reverted to
     # mean) -> under-corrects at long horizons. When True, generate multi-horizon
