@@ -1,0 +1,37 @@
+# Exp 9 (code lever): champion (IRS features + min_samples_leaf=3) + per-covariate
+# lags. rainfall/humidity (moisture-driven, longer delay to cases) get wider lag
+# windows than temperature. Unlisted covariates fall back to feature_min/max_lag.
+additional_continuous_covariates:
+  - rainfall_era5
+  - mean_temperature
+  - relative_humidity
+user_option_values:
+  prob_model: rf_residual
+  target_variable: disease_cases
+  log_transform: true
+  season_length_monthly: 12
+  n_samples: 100
+  feature_min_lag: 1
+  feature_max_lag: 3
+  rf_target_lags: 3
+  residual_quantile: true
+  covariate_lags:
+    rainfall_era5:     [1, 6]
+    relative_humidity: [1, 4]
+    mean_temperature:  [1, 2]
+  deseasonalize_covariates:
+    - rainfall_era5
+    - mean_temperature
+    - relative_humidity
+  irs_column: irs_allocated
+  irs_features: [level, decay, since, cumulative]
+  irs_halflife: 4.0
+  arima_stepwise: true
+  arima_approximation: true
+  arima_level: 68
+  rf:
+    n_estimators: 200
+    max_depth: null
+    min_samples_leaf: 3
+    max_features: sqrt
+    random_state: 42
