@@ -1,0 +1,4 @@
+filename,model_name,model_version,crps_log1p,crps
+irs_tgtlag3.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.3203280258940777,82.97205789777604
+irs_seasonal2.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.32100691644559387,83.23863446715444
+irs_seasonal3.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.3212157980070827,83.460519956809

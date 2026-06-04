@@ -69,3 +69,19 @@ to the 12×3×1 numbers above (much harder horizon). Best models only; log-CRPS 
 log-CRPS, vs −0.0014 at h=3): over a 12-month horizon the ARIMA-mean-bridged AR signal the RF
 captures matters much more. IRS features help CRPS (96.70→95.76) with a small log-CRPS gain.
 The improvements generalize to and amplify at long-range forecasting.
+
+## Seasonal features on the residual RF (champion + Fourier)
+
+Tested adding Fourier seasonal features (sin/cos annual cycle, lag 0) to the champion's
+residual RF. Full frozen harness, log-CRPS / CRPS.
+
+| model | log-CRPS | CRPS |
+|---|---|---|
+| **champion (no seasonal, config_tgtlag3)** | **0.3203** | **82.97** |
+| + Fourier order 2 | 0.3210 | 83.24 |
+| + Fourier order 3 | 0.3212 | 83.46 |
+
+**Negative result.** Seasonal features hurt both metrics, monotonically with harmonics —
+confirming the model's design choice to omit them: MSTL removes seasonality cleanly enough that
+the ARIMA residual has no exploitable seasonal structure, so the sin/cos terms only add overfit
+noise. `seasonal_fourier_order` left inert by default (0).
