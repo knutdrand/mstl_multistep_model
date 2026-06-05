@@ -136,6 +136,33 @@ construction (the body is nearly calibrated); the subset evidence says it is
 several times larger at h=12. New champion at h=3: **config_tgtlag3_var
 → log-CRPS 0.320022, CRPS 82.881**.
 
+### Angle 1c — why IRLS iterations regress (`residual_variance_iterations>1`)
+
+The variance head can be iterated (IRLS): refit the mean RF weighted by `1/v`, re-estimate
+`v`, repeat. The champion uses one pass. Instrumented investigation (`scripts/investigate_irls.py`,
+82 loc × 3 splits, tree mode, scale 0.5):
+
+| iters | log-CRPS | CRPS | cov | OOB-MSE outbreak pts |
+|---|---|---|---|---|
+| 1 (champion) | 0.3429 | **157.20** | **0.786** | 0.826 |
+| 2 | 0.3423 | 157.72 | 0.779 | 0.831 |
+| 3 | 0.3427 | 158.43 | 0.775 | 0.837 |
+
+log-CRPS is flat (noise), but **CRPS and coverage degrade monotonically**. Mechanism (direct
+from the instrumented loop): the IRLS weight `w=1/v` correlates **−0.53/−0.55** with `|R|` and
+gives top-decile-`|R|` (outbreak) points only **~0.5×** the weight of easy points. So each
+iteration shrinks the mean correction on outbreaks (`|corr|` on top-decile points 0.329→0.269→0.267,
+~19%) and raises OOB error there (0.826→0.837), while easy points barely improve. Count-scale
+CRPS and tail coverage are outbreak-dominated → they worsen; log-CRPS (compressed scale,
+outbreaks downweighted) → indifferent.
+
+**Root cause:** `1/v` (GLS/IRLS) reweighting is valid only for *aleatoric* noise independent of
+signal. Here `v` is the RF's *epistemic* inter-tree variance — largest exactly at the
+high-signal outbreak points — so inverse-`v` weighting discards the highest-information
+observations. `v`'s value is in the **spread** (iteration 1 uses it correctly, widening the
+interval at outbreaks), **not** as a mean-fit weight. One pass is correct by construction;
+`residual_variance_iterations` stays inert (default 1).
+
 ### Angle 1b — horizon-aware variance scale (NEGATIVE)
 
 Hypothesis: v(x) is roughly flat across horizon while ARIMA's σ_h grows, so the
