@@ -24,6 +24,7 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
 | 8 | exp/rf-leaf2 @77f1f41 | config | RF min_samples_leaf 3 → 2 (on exp7) | 0.3225 | 82.9 | 112.5 | 0.761 / 0.481 | regressed on log-CRPS — leaf<3 overfits log-scale tails; crps/mae keep dropping |
 | 9 | exp/per-covariate-lags @9d49cd6 | **code** | per-covariate lags: rainfall [1,6], humidity [1,4], temp [1,2] (on exp7) | **0.3217** | 83.8 | 113.7 | 0.764 / 0.482 | **CHAMPION** ✅ best log-CRPS (−1.1% vs baseline); crps/mae regress ~0.6% (log-scale vs raw-scale trade-off, accepted) |
 | 10 | config_tgtlag3_var | **code** | location-scale variance head on champion+target-lags: σ²_total = σ²_ARIMA + 0.5·tree_var (RF correction uncertainty propagated; the honest-uncertainty step the mean-EM lacked, see EM_ANGLES.md) | **0.3200** | **82.88** | — | — | **CHAMPION** ✅ improves BOTH metrics (−0.10% / −0.11% vs config_tgtlag3 0.3203/82.97) — rare non-trade-off; fixes mild h=3 under-dispersion. Gain several× larger at h=12 (subset). |
+| 11 | config_nbr (nbr1) | **code** | spatial neighbor feature: lagged leave-one-out district-mean of deseasonalized target (nbr_lags=1) on config_tgtlag3_var (see SPATIAL_NEIGHBOR.md) | 0.32007 | 82.90 | — | — | **negative** — subset suggested −0.0011 but did NOT replicate on full harness (marginally worse both). Spatial signal already captured (deseasonalized climate + per-loc AR; spray is district-uniform). neighbor-IRS skipped: redundant by construction (corr 0.988). Code inert (default off). |
 
 ## Outcome
 

@@ -1,0 +1,3 @@
+filename,model_name,model_version,crps_log1p,crps
+tgtlag3_var.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.32002213899413084,82.88078543581747
+nbr1.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.32007144453029923,82.89796566870368

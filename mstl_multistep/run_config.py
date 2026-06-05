@@ -108,6 +108,15 @@ class RunConfig(BaseModel):
     # mean-zero out of sample); deseason lags are bridged with the ARIMA mean forecast.
     rf_target_lag_source: Literal["deseason", "residual"] = "deseason"
 
+    # Spatial neighbor features (rf_residual). When ``neighbor_group_col`` names a column
+    # (e.g. "district") and ``neighbor_target_lags`` > 0, add lagged leave-one-out
+    # group-mean-of-deseasonalized-target features ``nbr_lag1..k`` to the RF — a spatial
+    # autoregressive signal (the surrounding district's transmission anomaly), the spatial
+    # analogue of rf_target_lags. Forecast-window lags are bridged by holding the last
+    # observed neighbour mean (persistence). 0 = off (default), exactly reproducible.
+    neighbor_group_col: str | None = None
+    neighbor_target_lags: int = 0
+
     # Fourier seasonal features (sin/cos of the annual cycle) added to the rf_residual
     # RF at lag 0. 0 = none (default) — the model normally relies on MSTL to remove
     # seasonality, but the seasonal-naive extrapolation can leave residual seasonal

@@ -30,6 +30,7 @@ from statsforecast.models import AutoARIMA
 from mstl_multistep import decomposition as dec
 from mstl_multistep.features import INDEX_COLS, build_model_features, build_seasonal_features
 from mstl_multistep.irs_features import build_irs_features
+from mstl_multistep.spatial_features import build_neighbor_target
 from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
 from mstl_multistep.run_config import RunConfig
 
@@ -47,6 +48,8 @@ class ArimaBaseRFResidualModel:
         self._feat_cols: list[str] | None = None
         self._cov_cols: list[str] | None = None  # covariate/IRS/dummy features
         self._tgt_cols: list[str] = []           # deseasonalized-target lag features
+        self._nbr_cols: list[str] = []           # spatial neighbor-target lag features
+        self._group_map: dict | None = None      # location -> neighbor group (e.g. district)
         self._freq: str | None = None
         self._season_lengths: list[int] | None = None
 
@@ -59,6 +62,14 @@ class ArimaBaseRFResidualModel:
         for j in range(1, k + 1):
             out[f"tgt_lag{j}"] = g.groupby("location")[value_col].shift(j).to_numpy()
         return out
+
+    def _build_group_map(self, df: pd.DataFrame, col: str) -> dict:
+        """``{location: group}`` from a static grouping column (e.g. district); ``{}`` if absent."""
+        if col not in df.columns:
+            logger.warning("neighbor_group_col %r not in data; spatial features disabled", col)
+            return {}
+        gm = df[["location", col]].drop_duplicates("location")
+        return dict(zip(gm["location"].astype(str), gm[col].astype(str)))
 
     def _season_lengths_for(self, freq: str) -> list[int]:
         sl = (
@@ -170,7 +181,19 @@ class ArimaBaseRFResidualModel:
                 tl = self._target_lag_frame(deseason, target, cfg.rf_target_lags)
             feats = feats.merge(tl, on=INDEX_COLS, how="left")
             self._tgt_cols = [f"tgt_lag{j}" for j in range(1, cfg.rf_target_lags + 1)]
-        self._feat_cols = self._cov_cols + self._tgt_cols
+
+        # Spatial neighbor lags: leave-one-out group-mean of the deseasonalized target.
+        self._nbr_cols = []
+        if cfg.neighbor_group_col and cfg.neighbor_target_lags > 0:
+            self._group_map = self._build_group_map(historic_df, cfg.neighbor_group_col)
+            if self._group_map:
+                nbr = build_neighbor_target(deseason, self._group_map, target)
+                nl = self._target_lag_frame(nbr, "_nbrD", cfg.neighbor_target_lags)
+                nl = nl.rename(columns={f"tgt_lag{j}": f"nbr_lag{j}"
+                                        for j in range(1, cfg.neighbor_target_lags + 1)})
+                feats = feats.merge(nl, on=INDEX_COLS, how="left")
+                self._nbr_cols = [f"nbr_lag{j}" for j in range(1, cfg.neighbor_target_lags + 1)]
+        self._feat_cols = self._cov_cols + self._tgt_cols + self._nbr_cols
 
         design = feats.merge(resid_df, on=INDEX_COLS, how="left")
         X = design[self._feat_cols].to_numpy(dtype=float)
@@ -297,6 +320,14 @@ class ArimaBaseRFResidualModel:
         future = future_df.copy()
         future["_ts"] = future["time_period"].apply(lambda p: period_to_timestamp(p, freq))
 
+        # Spatial neighbor history series per location (leave-one-out district mean of D).
+        nbr_hist_map: dict[str, np.ndarray] = {}
+        if self._nbr_cols and self._group_map:
+            nbr = build_neighbor_target(deseason_hist, self._group_map, target)
+            nbr["_ts"] = nbr["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+            for loc, g in nbr.groupby("location", sort=False):
+                nbr_hist_map[str(loc)] = g.sort_values("_ts")["_nbrD"].to_numpy(dtype=float)
+
         rows = []
         for loc, fg in future.groupby("location", sort=False):
             loc_str = str(loc)
@@ -337,6 +368,20 @@ class ArimaBaseRFResidualModel:
                         idx = lh + t - j
                         tl[t, ji] = s[idx] if idx >= 0 else np.nan
                 fut_feat = np.hstack([fut_feat, tl])
+            if self._nbr_cols:
+                # Spatial neighbor lags: bridge future steps with the last observed
+                # neighbour mean (persistence), then lag like the target bridge.
+                nbrh = nbr_hist_map.get(loc_str, np.array([], dtype=float))
+                fin = np.isfinite(nbrh)
+                last = nbrh[fin][-1] if fin.any() else 0.0
+                sn = np.concatenate([nbrh, np.full(h, last)])
+                lhn = len(nbrh)
+                nl = np.empty((h, len(self._nbr_cols)), dtype=float)
+                for t in range(h):
+                    for ji, j in enumerate(range(1, len(self._nbr_cols) + 1)):
+                        idx = lhn + t - j
+                        nl[t, ji] = sn[idx] if idx >= 0 else np.nan
+                fut_feat = np.hstack([fut_feat, nl])
             seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
             Xf = np.nan_to_num(fut_feat)
 
