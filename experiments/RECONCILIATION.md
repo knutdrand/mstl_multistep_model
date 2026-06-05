@@ -81,3 +81,24 @@ log-CRPS and CRPS** (the under-dispersion was penalised by the proper scores), a
 district product: best log-CRPS, nominal coverage, coherent. Plot:
 `docs/figs/champion_eval_district_calibrated.html`. (Currently a post-processing step on the
 aggregated .nc; could be integrated into the aggregation/model pipeline.)
+
+## Per-sector interval calibration (`scripts/calibrate_sector_ci.py`)
+
+Sector coverage averages 0.80 but is **heterogeneous across sectors** (per-sector cov80 std 0.123,
+i.e. sectors ~0.55-0.95). Calibrate each sector with `lambda[s,h] = lambda_h^global x c_s`, where
+`c_s` is a per-sector level (0.80-quantile of the edge ratio) **shrunk toward 1** (K chosen by
+LOPO-CV) to avoid overfitting the ~36 cells/sector. Done in **log1p space** (where log-CRPS lives;
+coverage is transform-invariant) -- doing it in count space fixes coverage but *regresses* log-CRPS
+(0.3123 -> 0.3190); log space does not.
+
+| | per-sector cov80 std | log-CRPS | CRPS |
+|---|---|---|---|
+| uncalibrated | 0.123 | 0.3123 | 81.88 |
+| per-sector log-space, in-sample lambda | 0.046 | 0.3066 (optimistic) | 80.92 |
+| per-sector log-space, **CV out-of-sample** | 0.046 (CV 0.033) | **0.3114** | -- |
+
+Honest verdict (K=10): per-sector coverage heterogeneity collapses (std 0.123 -> 0.046,
+CV-validated), and out-of-sample log-CRPS is a small genuine improvement (0.3123 -> 0.3114) -- the
+in-sample 0.3066 is optimistic but the CV gain is positive, so calibrating each sector's spread in
+log space fixes coverage *and* nudges the proper score the right way. Post-processing step on the
+sector .nc (`output/arima012_bank_sector_cal.nc`); could be folded into the model's predict().
