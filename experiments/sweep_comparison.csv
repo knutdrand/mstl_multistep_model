@@ -1,0 +1,7 @@
+filename,model_name,model_version,crps_log1p,crps
+tgtlag3_var.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.32002213899413084,82.88078543581747
+arima012.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.3135398277982175,81.77063522288202
+arima012_bank.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.31231762372069544,81.87627100858114
+arima011.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.31488371801280485,82.648300438048
+arima111.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.3150246344812341,82.9671467676987
+arima013.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.31418088198862265,81.40650066637292
