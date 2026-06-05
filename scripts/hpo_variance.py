@@ -71,11 +71,19 @@ def main():
     base = load_model_configuration(BASE); cov = base.additional_continuous_covariates
     print(f"locations={df.location.nunique()} splits={len(splits)}")
 
-    configs = [("champion (none)", {})]
-    for sc in (0.5, 1.0, 2.0):
-        configs.append((f"tree  scale={sc}", {"residual_variance": "tree", "residual_variance_scale": sc}))
-    for sc in (1.0, 2.0):
-        configs.append((f"model scale={sc}", {"residual_variance": "model", "residual_variance_scale": sc}))
+    configs = [
+        ("champion (none)", {}),
+        ("tree s=0.5 p=0 (cur)", {"residual_variance": "tree", "residual_variance_scale": 0.5}),
+    ]
+    for p in (0.5, 1.0, 1.5, 2.0):
+        configs.append((f"tree s=0.5 p={p}",
+                        {"residual_variance": "tree", "residual_variance_scale": 0.5,
+                         "residual_variance_horizon_power": p}))
+    # a couple lower-base + steeper-power combos (base small at h=1, grows out)
+    for sc, p in ((0.25, 1.0), (0.25, 2.0)):
+        configs.append((f"tree s={sc} p={p}",
+                        {"residual_variance": "tree", "residual_variance_scale": sc,
+                         "residual_variance_horizon_power": p}))
 
     res = []
     for label, over in configs:

@@ -135,3 +135,31 @@ under-dispersion rather than re-allocating mass). The gain is marginal at h=3 by
 construction (the body is nearly calibrated); the subset evidence says it is
 several times larger at h=12. New champion at h=3: **config_tgtlag3_var
 → log-CRPS 0.320022, CRPS 82.881**.
+
+### Angle 1b — horizon-aware variance scale (NEGATIVE)
+
+Hypothesis: v(x) is roughly flat across horizon while ARIMA's σ_h grows, so the
+head's relative contribution shrinks with horizon — and since the 1-step-trained
+RF correction should get *less* reliable further out, multiplying the per-step
+scale by `step**power` ought to help long horizon without hurting h=3. Added
+`residual_variance_horizon_power` (0.0 = flat, exactly reproducible).
+
+Result — **falsified, robust negative in both horizons.** log-CRPS worsens
+monotonically with `power`, coverage over-inflates:
+
+| | p=0 (flat) | p=0.5 | p=1.0 | p=2.0 |
+|---|---|---|---|---|
+| h=3 log-CRPS / cov | 0.3099 / 0.821 | 0.3102 / 0.831 | 0.3110 / 0.843 | 0.3171 / 0.877 |
+| h=12 log-CRPS / cov | **0.4694** / 0.793 | 0.4703 / 0.816 | 0.4766 / 0.868 | 0.5891 / 0.951 |
+
+The premise was wrong: the *flat* head already brings coverage to ~nominal at
+h=12 (0.793) — the long-horizon under-dispersion is **not** horizon-growing in a
+way that needs extra power, so any `power>0` just over-disperses. Lower-base +
+power combos (s=0.25, p=1–2) also lose. `residual_variance_horizon_power` stays
+in the code, inert (default 0.0); the flat `scale=0.5` `config_tgtlag3_var`
+remains champion.
+
+(Subset caveat: the `nunique//n_locations` stride selects different location
+subsets at different `--n-locations`, so absolute subset log-CRPS is comparable
+only *within* a run, not across. The power monotonicity above is within-run and
+robust; the flat-head-vs-champion margin at h=3 is full-harness-authoritative.)

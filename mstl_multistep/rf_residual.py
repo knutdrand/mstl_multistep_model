@@ -357,9 +357,13 @@ class ArimaBaseRFResidualModel:
             else:
                 rf_resid = self._rf.predict(Xf)  # (h,)
                 if self._var_mode != "none":
-                    # Honest predictive variance: ARIMA spread + variance of the RF correction.
+                    # Honest predictive variance: ARIMA spread + variance of the RF correction,
+                    # the latter optionally grown with horizon (step**power) since the 1-step-
+                    # trained correction is less reliable further out.
                     v = self._residual_variance(Xf)  # (h,)
-                    sigma_eff = np.sqrt(sigma_h ** 2 + cfg.residual_variance_scale * v)
+                    steps = np.arange(1, h + 1, dtype=float)
+                    scale_t = cfg.residual_variance_scale * steps ** cfg.residual_variance_horizon_power
+                    sigma_eff = np.sqrt(sigma_h ** 2 + scale_t * v)
                     draws = rng.normal(
                         loc=mean_h[:, None], scale=sigma_eff[:, None], size=(h, cfg.n_samples)
                     )

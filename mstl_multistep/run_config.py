@@ -140,6 +140,13 @@ class RunConfig(BaseModel):
     residual_variance: Literal["none", "tree", "model"] = "none"
     residual_variance_scale: float = 1.0
     residual_variance_iterations: int = 1
+    # Horizon-growth of the variance head. v(x) (the correction's variance) is roughly
+    # flat across the forecast horizon, but ARIMA's sigma_h grows, so the head's relative
+    # contribution shrinks with horizon -- backwards, since the RF correction (trained on
+    # ~1-step residuals, applied h-step) becomes *less* reliable as the horizon grows. The
+    # per-step scale is multiplied by step**residual_variance_horizon_power (step=1..h), so
+    # 0.0 (default) reproduces the flat-scale behaviour exactly and >0 widens later steps more.
+    residual_variance_horizon_power: float = 0.0
 
     # Per-horizon residual modelling (rf_residual). The default RF trains on ~1-step
     # in-sample ARIMA residuals but is applied to h-step forecasts (ARIMA reverted to
