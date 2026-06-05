@@ -1,0 +1,124 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\Var}{\operatorname{Var}}
+
+\title{\vspace{-1.5em}The Mathematics of the Modal Base Model:\\[0.2em]
+\large ARIMA$(0,1,1)$ $\equiv$ Simple Exponential Smoothing}
+\author{Base forecaster in \code{mstl\_multistep} \;|\; per-location, on the deseasonalised log series}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent
+On this data the per-location AutoARIMA most often selects order $(p,d,q)=(0,1,1)$ (the modal
+choice; $d{=}1$ in $93\%$ of series, AR order usually $0$). This note works through the
+mathematics of that model on a location's MSTL-deseasonalised log series $D_t$. ARIMA$(0,1,1)$
+is exactly \textbf{simple exponential smoothing (SES)}: a one-parameter EWMA whose point
+forecast is the flat last level, whose forecast standard deviation grows like $\sqrt{h}$, and
+whose one-step residual is white noise. Those three facts explain three things observed
+empirically in this model --- the flat multi-step mean, the horizon-growing spread
+$\sigma_h$, and the near-noise residual the Random Forest is asked to correct.
+\end{abstract}
+
+\section{Definition}
+Let $B$ be the backshift operator, $B\,D_t = D_{t-1}$. Order $(p,d,q)=(0,1,1)$ means: difference
+once ($d=1$), no autoregression ($p=0$), and a first-order moving average on the difference
+($q=1$):
+\begin{equation}
+(1-B)\,D_t \;=\; (1+\theta B)\,\varepsilon_t,
+\qquad \varepsilon_t \sim \mathrm{WN}(0,\sigma^2),
+\label{eq:def}
+\end{equation}
+or written out,
+\begin{equation}
+D_t \;=\; D_{t-1} + \varepsilon_t + \theta\,\varepsilon_{t-1}.
+\label{eq:explicit}
+\end{equation}
+There is a single dynamic parameter $\theta$ (plus the innovation variance $\sigma^2$),
+estimated by maximum likelihood per location. Invertibility requires $|\theta|<1$.
+
+\section{It is simple exponential smoothing}
+Equation~\eqref{eq:def} is the reduced form of the \emph{local-level} (SES) state-space model.
+Introduce a level $\ell_t$; the model is equivalent to the recursion
+\begin{equation}
+\hat D_{t+1\mid t} = \ell_t,
+\qquad
+\ell_t = \alpha\,D_t + (1-\alpha)\,\ell_{t-1},
+\qquad \boxed{\;\alpha = 1+\theta\;}
+\label{eq:ses}
+\end{equation}
+so the level is an \textbf{exponentially-weighted moving average} of the observations,
+\begin{equation}
+\ell_t \;=\; \alpha\sum_{j\ge 0}(1-\alpha)^j\,D_{t-j}.
+\label{eq:ewma}
+\end{equation}
+The single estimated $\theta$ sets the memory: $\theta\to-1\Rightarrow\alpha\to0$ (very smooth,
+long memory); $\theta\to0\Rightarrow\alpha\to1$ (a near random walk that just tracks the last
+value).
+
+\section{The forecast function is flat}
+With no AR term and one unit root, the $h$-step point forecast for \emph{every} horizon equals
+the current level:
+\begin{equation}
+\hat D_{T+h\mid T} \;=\; \ell_T \qquad\text{for all } h\ge 1.
+\label{eq:flat}
+\end{equation}
+This is the flat multi-step mean seen in practice (e.g.\ a forecast vector
+$[\,\mu_1,\mu_2,\mu_3\,]$ with all three entries equal). The ARIMA base therefore contributes
+essentially \emph{no} horizon dynamics beyond the first step --- it carries the smoothed last
+level forward --- so any multi-step ``signal'' must come from the covariate (Random Forest)
+correction, not from ARIMA's autoregression.
+
+\section{The predictive variance grows with horizon}
+ARIMA$(0,1,1)$ is equivalent to ETS(A,N,N), whose $h$-step forecast-error variance is
+\begin{equation}
+\Var\!\big(D_{T+h}-\hat D_{T+h\mid T}\big) \;=\; \sigma^2\big[\,1+(h-1)\alpha^2\,\big],
+\qquad
+\sigma_h \;=\; \sigma\sqrt{\,1+(h-1)\alpha^2\,}.
+\label{eq:var}
+\end{equation}
+Thus $\sigma_1=\sigma$, $\sigma_2=\sigma\sqrt{1+\alpha^2}$, \dots: the variance is \emph{linear}
+in $h$ and the standard deviation grows like $\sqrt{h}$. This is exactly the $\sigma_h$ the
+model reads off the $68\%$ predictive interval and then widens with the variance head,
+$\sigma_{\text{eff}}^2=\sigma_h^2+\tfrac12\,v(x)$.
+
+\section{What the Random Forest learns --- and why the residual is noise}
+The one-step-ahead fitted value is $\hat D_{t\mid t-1}=\ell_{t-1}$, so the residual the RF is
+trained on is the model's own innovation:
+\begin{equation}
+R_t \;=\; D_t-\hat D_{t\mid t-1} \;=\; D_t-\ell_{t-1} \;=\; \varepsilon_t,
+\label{eq:resid}
+\end{equation}
+and the level update is simply $\ell_t=\ell_{t-1}+\alpha R_t$. So $R_t$ is \textbf{white noise by
+construction} once SES has absorbed the level. This is the mathematical reason the
+feature-to-$R$ correlations are tiny ($\lvert\rho\rvert\le0.10$) and the RF correction is only a
+small nudge: the forest can recover only the \emph{covariate-driven} structure that leaks into
+$\varepsilon_t$ (climate / IRS effects SES cannot see), because there is no autoregressive
+structure left to exploit.
+
+\section{The drift variant}
+ARIMA$(0,1,1)$ with drift adds a constant $c$ to the differenced equation,
+\begin{equation}
+(1-B)D_t = c + (1+\theta B)\varepsilon_t
+\;\Longrightarrow\;
+\hat D_{T+h\mid T} = \ell_T + c\,h,
+\label{eq:drift}
+\end{equation}
+turning the flat forecast~\eqref{eq:flat} into a straight line of slope $c$ (SES with a linear
+trend). It is useful only for the $\sim$16\% of series for which AutoARIMA includes a drift term.
+
+\section*{Summary}
+The model's typical base learner is one-parameter simple exponential smoothing: forecast
+$=$ flat last level~\eqref{eq:flat}, interval widening like $\sqrt{h}$~\eqref{eq:var}, and a
+white-noise residual~\eqref{eq:resid}. Each of these is observable directly in the fitted model
+and accounts for the flat multi-step mean, the growing $\sigma_h$, and the near-noise RF target.
+\end{document}

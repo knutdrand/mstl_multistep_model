@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-from statsforecast.models import AutoARIMA
+from statsforecast.models import ARIMA, AutoARIMA
 
 from mstl_multistep import decomposition as dec
 from mstl_multistep.features import INDEX_COLS, build_model_features, build_seasonal_features
@@ -50,6 +50,7 @@ class ArimaBaseRFResidualModel:
         self._tgt_cols: list[str] = []           # deseasonalized-target lag features
         self._nbr_cols: list[str] = []           # spatial neighbor-target lag features
         self._group_map: dict | None = None      # location -> neighbor group (e.g. district)
+        self._loc_group: dict | None = None      # location -> encoding group (district/cluster id)
         self._freq: str | None = None
         self._season_lengths: list[int] | None = None
 
@@ -70,6 +71,58 @@ class ArimaBaseRFResidualModel:
             return {}
         gm = df[["location", col]].drop_duplicates("location")
         return dict(zip(gm["location"].astype(str), gm[col].astype(str)))
+
+    def _cluster_locations(self, df: pd.DataFrame) -> dict:
+        """``{location: 'c<k>'}`` from KMeans on each sector's standardized seasonal shape + level.
+
+        Leakage-safe: called in ``fit`` on the training window only. The feature vector is the
+        12-month MSTL seasonal cycle (mean-removed = pure shape) plus the mean log-target level.
+        """
+        from sklearn.cluster import KMeans
+
+        target = self.cfg.target_variable
+        _, decomps = dec.decompose_panel(
+            df, self._freq, target, self._season_lengths, self.cfg.log_transform
+        )
+        locs, rows = [], []
+        for loc, decomp in decomps.items():
+            seas = dec.extrapolate_seasonal(decomp, self._season_lengths, 12)
+            shape = seas - float(np.mean(seas))
+            level = float(np.nanmean(decomp["data"].to_numpy(dtype=float)))
+            rows.append(np.concatenate([shape, [level]]))
+            locs.append(str(loc))
+        X = np.asarray(rows, dtype=float)
+        X = np.nan_to_num((X - X.mean(0)) / (X.std(0) + 1e-9))
+        k = int(min(self.cfg.n_clusters, len(locs)))
+        labels = KMeans(n_clusters=k, random_state=self.cfg.random_seed, n_init=10).fit_predict(X)
+        return {loc: f"c{lab}" for loc, lab in zip(locs, labels)}
+
+    def _encode_locations(self, df: pd.DataFrame, fit: bool):
+        """Return ``(frame[INDEX_COLS + locgrp_* one-hots], cols)`` for district/cluster encoding.
+
+        ``None, []`` for the ``sector``/``none`` encodings (sector is handled by the built-in
+        dummies in build_model_features). On ``fit`` the location->group map is computed and
+        stored; on predict the stored map is reused (unseen sectors -> all-zero after reindex).
+        """
+        enc = self.cfg.location_encoding
+        if enc in ("sector", "none"):
+            return None, []
+        if fit:
+            self._loc_group = (
+                self._build_group_map(df, "district") if enc == "district"
+                else self._cluster_locations(df)
+            )
+        gm = self._loc_group or {}
+        out = df[INDEX_COLS].copy()
+        grp = df["location"].astype(str).map(gm)
+        dummies = pd.get_dummies(grp, prefix="locgrp").astype(float)
+        dummies = dummies.reindex(sorted(dummies.columns), axis=1)
+        out = pd.concat([out.reset_index(drop=True), dummies.reset_index(drop=True)], axis=1)
+        return out, [c for c in out.columns if c not in INDEX_COLS]
+
+    def _sector_dummies_flag(self) -> bool:
+        """Built-in per-sector one-hots only when encoding is the default ``sector``."""
+        return self.cfg.location_encoding == "sector" and self.cfg.use_location_dummies
 
     def _season_lengths_for(self, freq: str) -> list[int]:
         sl = (
@@ -99,11 +152,19 @@ class ArimaBaseRFResidualModel:
 
         z = norm.ppf(0.5 + cfg.arima_level / 200.0)
         try:
-            model = AutoARIMA(
-                season_length=1,  # the series is already deseasonalized
-                approximation=cfg.arima_approximation,
-                stepwise=cfg.arima_stepwise,
-            )
+            if cfg.arima_order is not None:
+                # shared fixed order across all locations (coefficients still per-series)
+                model = ARIMA(
+                    order=tuple(int(o) for o in cfg.arima_order),
+                    season_length=1,
+                    include_drift=cfg.arima_include_drift,
+                )
+            else:
+                model = AutoARIMA(
+                    season_length=1,  # the series is already deseasonalized
+                    approximation=cfg.arima_approximation,
+                    stepwise=cfg.arima_stepwise,
+                )
             res = model.forecast(y=clean, h=h, level=[cfg.arima_level], fitted=want_fitted)
             fitted = np.asarray(res["fitted"], dtype=float) if want_fitted else None
             mean = np.asarray(res["mean"], dtype=float)
@@ -140,13 +201,19 @@ class ArimaBaseRFResidualModel:
             self._season_lengths,
             cfg.feature_min_lag,
             cfg.feature_max_lag,
-            cfg.use_location_dummies,
+            self._sector_dummies_flag(),
             cfg.deseasonalize_covariates,
             cfg.lags_by_col(),
         )
+        enc, enc_cols = self._encode_locations(historic_df, fit=True)
+        if enc is not None:
+            feats = feats.merge(enc, on=INDEX_COLS, how="left")
+            for c in enc_cols:
+                feats[c] = feats[c].fillna(0.0)
         if cfg.irs_column and cfg.irs_features:
             irs, irs_cols = build_irs_features(
-                historic_df, None, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
+                historic_df, None, cfg.irs_column, cfg.irs_features, cfg.irs_halflife,
+                chem_column=cfg.irs_chemical_column,
             )
             feats = feats.merge(irs, on=INDEX_COLS, how="left")
             for c in irs_cols:
@@ -302,13 +369,19 @@ class ArimaBaseRFResidualModel:
             self._season_lengths,
             cfg.feature_min_lag,
             cfg.feature_max_lag,
-            cfg.use_location_dummies,
+            self._sector_dummies_flag(),
             cfg.deseasonalize_covariates,
             cfg.lags_by_col(),
         )
+        enc, _ = self._encode_locations(
+            pd.concat([historic_df, future_df], ignore_index=True), fit=False
+        )
+        if enc is not None:
+            feats_all = feats_all.merge(enc, on=INDEX_COLS, how="left")
         if cfg.irs_column and cfg.irs_features:
             irs, _ = build_irs_features(
-                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
+                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife,
+                chem_column=cfg.irs_chemical_column,
             )
             feats_all = feats_all.merge(irs, on=INDEX_COLS, how="left")
         if cfg.seasonal_fourier_order > 0:
@@ -554,7 +627,8 @@ class ArimaBaseRFResidualModel:
         )
         if cfg.irs_column and cfg.irs_features:
             irs, irs_cols = build_irs_features(
-                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife
+                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife,
+                chem_column=cfg.irs_chemical_column,
             )
             feats = feats.merge(irs, on=INDEX_COLS, how="left")
             for c in irs_cols:

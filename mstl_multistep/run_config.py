@@ -57,6 +57,16 @@ class RunConfig(BaseModel):
     # carry a longer lag span than temperature. Names not present are ignored.
     covariate_lags: dict[str, list[int]] = Field(default_factory=dict)
     use_location_dummies: bool = True
+    # How the pooled RF encodes location identity. The 406 sector one-hots are largely
+    # redundant (the per-location ARIMA already removes each sector's level) yet dominate the
+    # feature count, diluting max_features="sqrt" sampling of the informative covariates.
+    #   "sector"  -> one-hot per sector (406 cols; current behaviour, with use_location_dummies)
+    #   "none"    -> no location columns (ARIMA carries the level)
+    #   "district"-> one-hot the admin ``district`` column (46 cols)
+    #   "cluster" -> one-hot a ``cluster_id`` from KMeans on each sector's standardized seasonal
+    #                shape + mean level, fit on the training window only (leakage-safe), ``n_clusters`` cols
+    location_encoding: Literal["sector", "none", "district", "cluster"] = "sector"
+    n_clusters: int = 20
     # Names of covariates to MSTL-deseasonalize before lagging, so the model sees
     # their anomalies (matching the deseasonalized target) rather than the raw
     # seasonal series. Covariates not listed are passed through raw — e.g. keep
@@ -84,6 +94,14 @@ class RunConfig(BaseModel):
     arima_approximation: bool = False
     arima_stepwise: bool = True
     arima_level: int = 68
+    # Force a SHARED, fixed ARIMA order across all locations instead of per-location AutoARIMA
+    # order selection. None (default) = AutoARIMA picks (p,d,q) per series (current behaviour).
+    # A 3-element list ``[p, d, q]`` makes every location fit that fixed order (own coefficients
+    # still estimated per series) — removes order-selection noise and is much faster. The data's
+    # modal order is [0, 1, 1] (= simple exponential smoothing). arima_include_drift adds a drift
+    # (linear trend) term, only meaningful when d>=1.
+    arima_order: list[int] | None = None
+    arima_include_drift: bool = False
 
     # IRS allocation feature extraction (rf_residual mode). When ``irs_column`` is
     # set and ``irs_features`` is non-empty, dense protective-effect features are
@@ -93,6 +111,12 @@ class RunConfig(BaseModel):
     irs_column: str | None = None
     irs_features: list[str] = Field(default_factory=list)
     irs_halflife: float = 4.0
+    # When set to the insecticide column (e.g. "irs_insecticide_used"), the ``decay`` feature
+    # uses a *per-campaign, chemical-specific* decay half-life from the literature (carbamate ~2,
+    # pyrethroid ~3, organophosphate ~5, clothianidin/Fludora ~8 months; see
+    # :data:`mstl_multistep.irs_features.CHEM_HALFLIFE_MONTHS`) instead of the single
+    # ``irs_halflife`` for every campaign. None (default) = fixed half-life, champion unchanged.
+    irs_chemical_column: str | None = None
 
     # Number of lagged deseasonalized-target values fed to the rf_residual RF as
     # extra features (0 = none, the default — ARIMA alone carries the AR dynamics).

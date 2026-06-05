@@ -1,0 +1,159 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+\title{\vspace{-1.5em}AutoARIMA inside the \code{mstl\_multistep} Model\\[0.3em]
+\large What it forecasts, how its orders are chosen, and the hyperparameters we set}
+\author{Model: \code{config\_tgtlag3\_var} \;|\; \code{statsforecast 2.0.3}}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent
+In this model an \textbf{AutoARIMA is fit independently per location} to the MSTL-deseasonalised
+log target. It is the \emph{base} forecaster: it supplies both the conditional mean
+$\mu_h$ and the predictive spread $\sigma_h$, and its in-sample one-step residual is the
+target the Random Forest then corrects. We fix a handful of options (non-seasonal,
+stepwise, approximate, $68\%$ intervals); everything else --- the $(p,d,q)$ orders, the
+coefficients, the innovation variance --- is selected automatically per series by the
+Hyndman--Khandakar algorithm. On this data the chosen models are low-order and
+near-random-walk: $93\%$ use a single difference ($d{=}1$), the AR order is usually $0$,
+and the most common forms are ARIMA$(0,1,1)$, $(0,1,0)$, $(0,1,2)$.
+\end{abstract}
+
+\section{Role in the pipeline}
+After MSTL removes seasonality, each location has a deseasonalised log series
+$D_{\ell,t}$ (trend $+$ remainder). A separate ARIMA is fit to each $D_\ell$ and does two jobs:
+\begin{itemize}
+\item \textbf{Mean.} The $h$-step forecast $\mu_{\ell,h}$ carries the autoregressive / trend
+      dynamics. Reconstruction adds the seasonal-naive term and the RF correction:
+      $\hat L = S + \mu_h + g(x)$.
+\item \textbf{Spread.} The forecast interval gives $\sigma_{\ell,h}$, the model's principal
+      source of predictive uncertainty (it grows with horizon).
+\end{itemize}
+ARIMA is fit \textbf{per location} (406 independent models); pooling across locations happens
+only later, in the Random Forest.
+
+\section{What we fix vs.\ what AutoARIMA finds}
+
+We call \code{AutoARIMA} (statsforecast) with only a few options set; the rest are its defaults.
+
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Option & Value (this model) & Meaning \\
+\midrule
+\code{season\_length} & \textbf{1} & non-seasonal --- MSTL already removed seasonality \\
+\code{stepwise} & \textbf{True} & Hyndman--Khandakar stepwise search (not full grid) \\
+\code{approximation} & \textbf{True} & approximate (CSS) likelihood during search; final fit by MLE \\
+\code{level} & \textbf{68} & predictive interval level used to back out $\sigma_h$ \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{inherited defaults that shape the search:}}\\
+\code{ic} & \code{aicc} & model-selection criterion (corrected AIC) \\
+\code{test} & \code{kpss} & unit-root test that picks the differencing order $d$ \\
+\code{max\_p, max\_q} & 5, 5 & upper bounds on AR / MA order \\
+\code{max\_d} & 2 & max differencing \\
+\code{start\_p, start\_q} & 2, 2 & starting orders for the stepwise search \\
+\code{allowdrift, allowmean} & True, True & permit a drift (when $d{=}1$) / mean (when $d{=}0$) term \\
+\code{nmodels} & 94 & cap on models evaluated in the search \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Found automatically, per location:} the orders $(p,d,q)$, whether a
+drift/mean term is included, the AR/MA coefficients, and the innovation variance $\sigma^2$.
+Because \code{season\_length}=1, the seasonal orders are inert ($P{=}Q{=}D{=}0$).
+
+\section{How the orders are chosen (Hyndman--Khandakar)}
+For each series:
+\begin{enumerate}
+\item \textbf{Differencing $d$:} successive KPSS unit-root tests choose the smallest $d\le 2$
+      that makes the series stationary.
+\item \textbf{Seed models:} fit ARIMA$(2,d,2)$, $(0,d,0)$, $(1,d,0)$, $(0,d,1)$ (with a
+      constant where allowed) and keep the best by AICc.
+\item \textbf{Stepwise search:} repeatedly perturb $p$ and $q$ by $\pm1$ and toggle the
+      constant; accept any change that lowers AICc; stop at a local optimum (or \code{nmodels}).
+\item \textbf{Final fit:} with \code{approximation=True}, the search ranks models by a fast
+      conditional-sum-of-squares likelihood; the chosen model is then re-estimated by full
+      maximum likelihood.
+\end{enumerate}
+We enable \code{approximation} purely for speed --- the model fits hundreds of ARIMAs per
+backtest split (406 locations $\times$ 12 splits).
+
+\section{Orders actually selected on this data}
+Sample of 135 locations (deseasonalised log target, training window; 1 fell back to the
+constant-mean baseline):
+
+\begin{center}\small
+\begin{tabular}{@{}lr@{\quad}lr@{}}
+\toprule
+order & share & marginal & \\
+\midrule
+ARIMA$(0,1,1)$ & 20\% & $d=1$ & 93\% \\
+ARIMA$(0,1,0)$ & 17\% & $d=0$ & 7\% \\
+ARIMA$(0,1,2)$ & 16\% & $p=0$ & 53\% \\
+ARIMA$(1,1,1)$ & 11\% & $p=1$ & 28\% \\
+ARIMA$(1,1,2)$ & \phantom{0}7\% & $p\ge 2$ & 19\% \\
+ARIMA$(2,1,1)$ & \phantom{0}5\% & $q=0$ & 27\% \\
+ARIMA$(1,1,0)$ & \phantom{0}4\% & $q=1$ & 44\% \\
+others & 20\% & $q=2$ & 27\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+A drift/mean term is included in $\sim$16\% of series; the innovation variance on the
+deseasonalised log scale has median $\sigma^2\approx0.17$ (IQR $0.13$--$0.22$).
+
+\paragraph{Interpretation.} The dominant forms --- $(0,1,1)$, $(0,1,0)$, $(0,1,2)$ with
+$d{=}1$ and AR order usually $0$ --- are essentially a \emph{differenced local-level} process
+(a random walk, often with light MA smoothing; ARIMA$(0,1,1)$ is exactly simple exponential
+smoothing). This is why, beyond one step, the mean forecast $\mu_h$ flattens toward the last
+estimated level rather than mean-reverting strongly --- and why the Random Forest's
+covariate correction, not ARIMA's AR term, carries most of the multi-step ``signal.''
+
+\section{Extracting the mean and the spread}
+\code{AutoARIMA.forecast} returns the $h$-step mean and a $68\%$ interval $[\text{lo},\text{hi}]$.
+We treat the predictive distribution as Gaussian and back out the standard deviation:
+\[
+\sigma_{\ell,h} \;=\; \frac{\text{hi}_{\ell,h}-\text{lo}_{\ell,h}}{2z},\qquad
+z=\Phi^{-1}\!\Big(0.5+\tfrac{68}{200}\Big)=\Phi^{-1}(0.84)\approx 0.994 .
+\]
+The $68\%$ level is chosen so that $z\approx1$, i.e.\ the interval half-width is essentially
+one standard deviation. $\sigma_{\ell,h}$ is clamped to be finite and positive (floor $10^{-3}$)
+and \emph{grows with $h$}. In the model the final spread is widened further by the variance
+head, $\sigma_{\text{eff}}^2=\sigma_h^2+\tfrac12 v(x)$.
+
+\section{Input handling and fallbacks}
+Each series is cleaned before fitting: linear interpolation of internal gaps, then
+forward/backward fill (\code{interpolate(limit\_direction="both").ffill().bfill()}), so
+AutoARIMA always sees a finite series. Two safeguards:
+\begin{itemize}
+\item a series with \emph{no} finite values (a location with no history in the window) gets a
+      zero-mean, unit-$\sigma$ baseline;
+\item if AutoARIMA raises, it falls back to a constant-mean / sample-standard-deviation forecast.
+\end{itemize}
+
+\section{The residual the Random Forest consumes}
+The RF target is the ARIMA \textbf{in-sample, one-step-ahead} residual
+\[
+R_{\ell,t} \;=\; D_{\ell,t}-\hat A_{\ell,t},\qquad
+\hat A_{\ell,t}=\mathbb{E}[D_{\ell,t}\mid D_{\ell,<t}]\ \text{(one-step fitted)} .
+\]
+\textbf{Provenance note.} At training the residual is computed against the \emph{in-sample,
+single-step} fitted values; at prediction the RF correction is added to the
+\emph{out-of-sample, $h$-step} forecast $\mu_h$. So the residual the RF learns and the error
+it implicitly corrects differ in both senses (in-sample vs out-of-sample, single- vs
+multi-step). This drift is mild at short horizon (the near-random-walk models change little
+over $h{=}3$) and grows with $h$; the \code{rf\_horizon\_feature} variant trains on genuine
+out-of-sample multi-horizon residuals to remove it, and empirically helps only at long horizon.
+
+\end{document}
