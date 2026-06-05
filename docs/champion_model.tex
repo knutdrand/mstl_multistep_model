@@ -19,7 +19,7 @@
 \title{\vspace{-1.5em}The \code{mstl\_multistep} Champion Model\\[0.3em]
 \large MSTL $\rightarrow$ ARIMA $\rightarrow$ Random-Forest Residual,\\
 with a Location--Scale Variance Head}
-\author{Model configuration: \code{config\_tgtlag3\_var}}
+\author{Model configuration: \code{config\_arima012\_bank}}
 \date{\today}
 
 \begin{document}
@@ -31,12 +31,14 @@ with a Location--Scale Variance Head}
 This document describes the champion forecasting model in the \code{mstl\_multistep}
 project: a CHAP-compatible monthly disease-case forecaster. It is an \emph{additive
 decomposition} model on the log scale. Multiple Seasonal--Trend decomposition (MSTL)
-removes the annual cycle; an AutoARIMA models the deseasonalised dynamics \emph{and}
-supplies the predictive spread; a Random Forest corrects the ARIMA residual using lagged
-climate anomalies, engineered indoor-residual-spraying (IRS) features, and lagged
-self-history; and a \emph{location--scale variance head} widens the predictive interval by
-the Random Forest's own uncertainty. On the frozen evaluation harness (406 locations,
-3-month horizon) it reaches a log-CRPS of \textbf{0.3200} and CRPS of \textbf{82.88}.
+removes the annual cycle; a \textbf{shared fixed-order ARIMA$(0,1,2)$} (the same order for
+every location) models the deseasonalised dynamics \emph{and} supplies the predictive
+spread; a Random Forest corrects the ARIMA residual using lagged climate anomalies, an
+\textbf{expanded bank of indoor-residual-spraying (IRS) features} (incl.\ per-chemical decay
+channels), and lagged self-history; and a \emph{location--scale variance head} widens the
+predictive interval by the Random Forest's own uncertainty. On the frozen evaluation harness
+(406 locations, 3-month horizon) it reaches a log-CRPS of \textbf{0.3123} and CRPS of
+\textbf{81.88} --- a $\sim$4\% log-CRPS improvement over the climate-only baseline.
 \end{abstract}
 
 \section{Overview}
@@ -131,10 +133,16 @@ into a stable annual seasonal component $S$ (middle) and the deseasonalised seri
 \label{fig:decomp}
 \end{figure}
 
-\section{Step 2 --- AutoARIMA base (mean and spread)}
+\section{Step 2 --- Shared fixed-order ARIMA base (mean and spread)}
 
-A separate AutoARIMA is fit per location to the deseasonalised series $D$ (with
-\code{season\_length} $=1$, since seasonality is already removed). It plays two roles:
+A separate ARIMA is fit per location to the deseasonalised series $D$ (with
+\code{season\_length} $=1$, since seasonality is already removed), but \textbf{all locations
+share the same fixed order, ARIMA$(0,1,2)$} --- only each location's coefficients are
+estimated. This replaced per-location AutoARIMA order selection, which on short (157-month)
+noisy series is itself a source of noise (AutoARIMA overfits high-order/drift picks); a single
+robust order generalises better and was the largest single improvement found ($-2\%$ log-CRPS).
+See \code{arima\_in\_model.pdf} and \code{arima011\_math.pdf} for the order analysis and the
+SES interpretation. ARIMA plays two roles:
 \begin{enumerate}
 \item \textbf{Autoregressive mean.} The $h$-step forecast mean $\mu_{\ell,h}$ carries
       persistence/trend in $D$. Its in-sample one-step fit $\hat A$ defines the residual
@@ -144,8 +152,7 @@ A separate AutoARIMA is fit per location to the deseasonalised series $D$ (with
       $\sigma_h$ \emph{grows with horizon} and is the model's principal source of forecast
       uncertainty.
 \end{enumerate}
-AutoARIMA runs in stepwise, approximate mode for speed; a degenerate series falls back to a
-constant-mean / sample-sd baseline.
+A degenerate series (no finite history) falls back to a constant-mean / sample-sd baseline.
 
 \section{Step 3 --- Random-Forest residual correction}
 
@@ -171,18 +178,24 @@ The feature vector combines four blocks:
       \end{center}
       Moisture-driven drivers (rain, humidity) get longer windows than temperature.
 
-\item \textbf{Engineered IRS features.} The raw \code{irs\_allocated} column is a sparse
-      $0$--$1$ coverage fraction that fires only in campaign months ($\sim$2.5\% of rows).
-      Because its protective effect persists and is \emph{known in advance}, it is turned
-      into four dense, contemporaneous (lag-0) signals:
+\item \textbf{Engineered IRS feature bank.} The raw \code{irs\_allocated} column is a sparse
+      $0$--$1$ coverage fraction firing only in campaign months ($\sim$2.5\% of rows); its
+      protective effect persists and is \emph{known in advance}, so it is expanded into a
+      bank of dense, contemporaneous (lag-0) signals and the forest selects what matters:
       \begin{itemize}
-      \item \code{level} --- this month's allocation coverage;
-      \item \code{decay} --- protection reset to \code{level} on a campaign month and
-            decaying geometrically, $d_t=\max(\text{level}_t,\ \gamma\, d_{t-1})$ with
-            $\gamma = 0.5^{1/\text{halflife}}$, halflife $=4$ months;
-      \item \code{since} --- months since the last campaign (capped);
-      \item \code{cumulative} --- running count of campaign months (program-intensity stock).
+      \item \code{level}, \code{since} (months since last campaign, capped),
+            \code{cumulative} (campaign-count stock);
+      \item \textbf{per-chemical decay channels} --- the geometric-decay protection split into
+            \code{decay\_\{carbamate,pyrethroid,organophosphate,clothianidin\}}, each non-zero
+            only while that insecticide class is the active one (from \code{irs\_insecticide\_used}),
+            so the RF learns each chemical's effect magnitude (organophosphate/clothianidin
+            strongest; pyrethroid near-dead, consistent with resistance);
+      \item \textbf{decay basis} \code{decay2}, \code{decay8} (half-lives 2 and 8 months);
+      \item \textbf{recency} flags \code{recent3/6/12} and \code{rounds12} (campaigns in the
+            trailing year).
       \end{itemize}
+      (The earlier 4-feature set \code{level/decay/since/cumulative} with a fixed 4-month decay
+      was the prior champion; the bank improved on it.)
 
 \item \textbf{Self-history (target lags).} The deseasonalised target $D$ lagged $1$--$3$
       months. In the forecast window, lags that fall ahead of the origin are
@@ -215,10 +228,12 @@ reshuffled mean variance; moving the descent to the \emph{spread} coordinate is 
 \centering
 \includegraphics[width=\linewidth]{figs/fig2_arima_rf.pdf}
 \caption{Steps 2--4 for the same sector, zoomed on the forecast origin (dotted line).
-AutoARIMA fits the deseasonalised series $D$ in-sample ($\hat A$, dashed) and forecasts the
+The ARIMA fits the deseasonalised series $D$ in-sample ($\hat A$, dashed) and forecasts the
 mean $\mu_h$ with spread $\sigma_{\mathrm{ARIMA}}$; the Random Forest shifts the mean by the
 correction $g(x)$ (green markers); the variance head widens the predictive spread from
-$\sigma_{\mathrm{ARIMA}}$ to $\sigma_{\mathrm{eff}}$ (purple band).}
+$\sigma_{\mathrm{ARIMA}}$ to $\sigma_{\mathrm{eff}}$ (purple band). (Figures 1--3 illustrate the
+shared pipeline; they were rendered on an immediately-prior champion config --- the structure
+is identical.)}
 \label{fig:arimarf}
 \end{figure}
 
@@ -260,15 +275,16 @@ Group & Setting & Value \\
 Transform & \code{log\_transform} & true ($\log1p$) \\
           & \code{season\_length\_monthly} & 12 \\
 Base model & \code{prob\_model} & \code{rf\_residual} \\
-           & \code{arima\_stepwise / approximation} & true / true \\
+           & \code{arima\_order} & \textbf{[0, 1, 2]} (shared, all locations) \\
            & \code{arima\_level} & 68 \\
 Climate lags & \code{rainfall\_era5} & $1$--$6$ \\
              & \code{relative\_humidity} & $1$--$4$ \\
              & \code{mean\_temperature} & $1$--$2$ \\
              & \code{deseasonalize\_covariates} & all three \\
 IRS & \code{irs\_column} & \code{irs\_allocated} \\
-    & \code{irs\_features} & level, decay, since, cumulative \\
-    & \code{irs\_halflife} & 4.0 \\
+    & \code{irs\_chemical\_column} & \code{irs\_insecticide\_used} \\
+    & \code{irs\_features} (bank) & level, since, cumulative, chem\_channels, \\
+    & & decay2, decay8, recent3/6/12, rounds12 \\
 Self-history & \code{rf\_target\_lags} & 3 \\
 Variance head & \code{residual\_variance} & \code{tree} \\
               & \code{residual\_variance\_scale} ($\kappa$) & 0.5 \\
@@ -292,24 +308,26 @@ stride 1 --- the champion scores:
 Model & log-CRPS $\downarrow$ & CRPS $\downarrow$ \\
 \midrule
 Climate-only baseline (no IRS) & 0.3253 & 83.6 \\
-$+$ IRS features & 0.3222 & 83.4 \\
-$+$ per-covariate lags, leaf $=3$ & 0.3217 & 83.8 \\
-$+$ target lags ($=3$) & 0.3203 & 82.97 \\
-$+$ variance head \;\textbf{(champion)} & \textbf{0.3200} & \textbf{82.88} \\
+$+$ IRS features, per-covariate lags, leaf$=3$, target lags & 0.3203 & 82.97 \\
+$+$ variance head (\code{config\_tgtlag3\_var}) & 0.3200 & 82.88 \\
+$+$ shared ARIMA$(0,1,2)$ order (\code{config\_arima012}) & 0.3135 & 81.77 \\
+$+$ IRS feature bank \;\textbf{(champion, \code{config\_arima012\_bank})} & \textbf{0.3123} & \textbf{81.88} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\noindent\textbf{What drives the model's accuracy.} Only three levers ever added real value:
-(i) turning the sparse IRS column into dense persistence features; (ii) lagged self-history
-(target lags), which matter several times more at long horizon; and (iii) the variance head.
-Each adds \emph{information} or \emph{honest uncertainty}. A long list of alternatives ---
-EM/backfitting on the mean, Fourier seasonal features, $\sigma$ rescaling, quantile-GBM
-residuals, horizon-scaled variance, vegetation indices, and spatial (same-district) neighbour
-features --- were tested and did not help, indicating the model sits near its optimum for this
-architecture and data. The design philosophy is the recurring lesson: let each component own
-what it is best at (MSTL the season, ARIMA the persistence \emph{and the spread}, the forest
-the nonlinear anomalies), add information rather than re-shuffle it, and account for every
-component's uncertainty honestly.
+\noindent\textbf{What drives the model's accuracy.} The largest single lever was switching
+from per-location AutoARIMA \emph{order selection} to one \textbf{shared fixed ARIMA$(0,1,2)$}
+order ($-2\%$ log-CRPS): order selection on short noisy series is itself noise. On top of that,
+the levers that helped all either \emph{add information} (the IRS feature bank incl.\ per-chemical
+channels; lagged self-history) or \emph{account for uncertainty honestly} (the variance head).
+A long list of alternatives --- EM/backfitting on the mean, Fourier seasonal features, $\sigma$
+rescaling, quantile-GBM residuals, horizon-scaled variance, vegetation indices, spatial
+(same-district) neighbour features, chemical-\emph{rate} decay, and reduced location encodings
+(district/cluster) --- were tested and did not help. The recurring lesson: let each component
+own what it is best at (MSTL the season, ARIMA the persistence \emph{and the spread}, the forest
+the nonlinear anomalies), prefer one robust shared configuration over per-series selection on
+short data, add information rather than re-shuffle it, and account for every component's
+uncertainty honestly.
 
 \end{document}
