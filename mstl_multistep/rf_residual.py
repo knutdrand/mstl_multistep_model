@@ -42,6 +42,8 @@ class ArimaBaseRFResidualModel:
         self.feature_columns = list(feature_columns)
         self._rf: RandomForestRegressor | None = None
         self._qmodels: dict | None = None  # {level: quantile GBM} for residual_quantile mode
+        self._varmodel = None             # GBM on squared OOB residuals (residual_variance="model")
+        self._var_mode: str = "none"      # cached cfg.residual_variance for predict
         self._feat_cols: list[str] | None = None
         self._cov_cols: list[str] | None = None  # covariate/IRS/dummy features
         self._tgt_cols: list[str] = []           # deseasonalized-target lag features
@@ -187,16 +189,67 @@ class ArimaBaseRFResidualModel:
                 self._qmodels[float(q)] = m
             return self
 
-        self._rf = RandomForestRegressor(
-            n_estimators=cfg.rf.n_estimators,
-            max_depth=cfg.rf.max_depth,
-            min_samples_leaf=cfg.rf.min_samples_leaf,
-            max_features=cfg.rf.max_features,
-            random_state=cfg.rf.random_state,
-            n_jobs=-1,
-        )
-        self._rf.fit(X[mask], yres[mask])
+        self._fit_mean_and_variance(X[mask], yres[mask])
         return self
+
+    @staticmethod
+    def _tree_variance(rf: RandomForestRegressor, X: np.ndarray) -> np.ndarray:
+        """Inter-tree variance of the RF mean estimate — epistemic uncertainty per row."""
+        preds = np.stack([est.predict(X) for est in rf.estimators_], axis=0)
+        return preds.var(axis=0)
+
+    def _fit_mean_and_variance(self, Xm: np.ndarray, ym: np.ndarray) -> None:
+        """Fit the mean RF and (optionally) a variance head via location-scale IRLS.
+
+        ``residual_variance="none"`` is the champion path: a single unweighted RF, no
+        variance head. Otherwise honest OOB residuals drive a per-point variance v(x)
+        (RF inter-tree spread for "tree", a GBM on log squared OOB residuals for
+        "model"); with ``residual_variance_iterations>1`` the mean RF is refit weighted
+        by 1/v and v re-estimated (coordinate descent). v(x) is consumed in predict to
+        widen the ARIMA spread.
+        """
+        cfg = self.cfg
+        mode = cfg.residual_variance
+        self._var_mode = mode
+        self._varmodel = None
+        iters = max(1, int(cfg.residual_variance_iterations))
+        weight = None
+        for it in range(iters):
+            rf = RandomForestRegressor(
+                n_estimators=cfg.rf.n_estimators,
+                max_depth=cfg.rf.max_depth,
+                min_samples_leaf=cfg.rf.min_samples_leaf,
+                max_features=cfg.rf.max_features,
+                random_state=cfg.rf.random_state,
+                n_jobs=-1,
+                oob_score=(mode != "none"),
+            )
+            rf.fit(Xm, ym, sample_weight=weight)
+            self._rf = rf
+            if mode == "none":
+                return
+            oob = rf.oob_prediction_
+            ok = np.isfinite(oob)
+            e2 = np.where(ok, (ym - oob) ** 2, np.nan)
+            if mode == "model":
+                vm = HistGradientBoostingRegressor(
+                    loss="squared_error", max_iter=200, learning_rate=0.05,
+                    random_state=cfg.rf.random_state,
+                )
+                m = ok & np.isfinite(e2)
+                vm.fit(Xm[m], np.log(e2[m] + 1e-6))
+                self._varmodel = vm
+                vtrain = np.exp(vm.predict(Xm))
+            else:  # "tree"
+                vtrain = self._tree_variance(rf, Xm)
+            if it < iters - 1:
+                weight = 1.0 / np.clip(vtrain, 1e-6, None)
+
+    def _residual_variance(self, Xf: np.ndarray) -> np.ndarray:
+        """Per-row variance v(x) of the RF correction on forecast rows (see _fit_mean_and_variance)."""
+        if self._var_mode == "model" and self._varmodel is not None:
+            return np.exp(self._varmodel.predict(Xf))
+        return self._tree_variance(self._rf, Xf)
 
     def predict(self, historic_df: pd.DataFrame, future_df: pd.DataFrame) -> pd.DataFrame:
         if self._rf is None and self._qmodels is None:
@@ -303,7 +356,16 @@ class ArimaBaseRFResidualModel:
                 final = seasonal[:, None] + mean_h[:, None] + resid  # (h, n)
             else:
                 rf_resid = self._rf.predict(Xf)  # (h,)
-                final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
+                if self._var_mode != "none":
+                    # Honest predictive variance: ARIMA spread + variance of the RF correction.
+                    v = self._residual_variance(Xf)  # (h,)
+                    sigma_eff = np.sqrt(sigma_h ** 2 + cfg.residual_variance_scale * v)
+                    draws = rng.normal(
+                        loc=mean_h[:, None], scale=sigma_eff[:, None], size=(h, cfg.n_samples)
+                    )
+                    final = seasonal[:, None] + draws + rf_resid[:, None]  # (h, n)
+                else:
+                    final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
             if cfg.log_transform:
                 final = np.expm1(final)
             final = np.clip(final, a_min=0.0, a_max=None)

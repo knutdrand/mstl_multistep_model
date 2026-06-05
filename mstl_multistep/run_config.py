@@ -125,6 +125,22 @@ class RunConfig(BaseModel):
         default_factory=lambda: [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95]
     )
 
+    # Location-scale coordinate descent (rf_residual, non-quantile path). The model
+    # draws ARIMA's symmetric Gaussian spread and adds the RF correction as a point
+    # with no uncertainty -> the predictive variance ignores how (un)certain the
+    # correction is. When set, estimate a per-point variance v(x) of the correction
+    # and widen the predictive spread to sqrt(sigma_ARIMA^2 + residual_variance_scale * v(x)),
+    # so outbreak-prone / high-covariate-signal contexts get wider intervals.
+    #   "none"  -> current behaviour (exactly reproducible)
+    #   "tree"  -> RF inter-tree variance (epistemic uncertainty of the correction)
+    #   "model" -> a GBM regressing the squared OOB residuals on covariates
+    #              (aleatoric, heteroscedastic noise)
+    # residual_variance_iterations>1 turns it into IRLS coordinate descent: refit the
+    # mean RF weighted by 1/v, re-estimate v, repeat (1 = single pass, no reweighting).
+    residual_variance: Literal["none", "tree", "model"] = "none"
+    residual_variance_scale: float = 1.0
+    residual_variance_iterations: int = 1
+
     # Per-horizon residual modelling (rf_residual). The default RF trains on ~1-step
     # in-sample ARIMA residuals but is applied to h-step forecasts (ARIMA reverted to
     # mean) -> under-corrects at long horizons. When True, generate multi-horizon
