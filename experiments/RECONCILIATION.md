@@ -54,3 +54,30 @@ Caveats: the probabilistic reconciliation used here is a first-cut mean-shift of
 count-space MinT is scale-sensitive; a variance-stabilised-space or fully-probabilistic MinT
 might recover a little, but the architecture-level signal (independent-aggregate ~= bottom-up)
 caps the available upside.
+
+## Follow-up: bottom-up district intervals are under-dispersed -- and a calibration that fixes it (WIN)
+
+`scripts/coverage_check.py`: the **sector** forecasts are well-calibrated (cov@80% = 0.80,
+cov@50% = 0.51), but **bottom-up district** intervals are too narrow -- cov@80% = **0.68**,
+cov@50% = **0.39**. Cause: bottom-up sums *independently-drawn* sector samples, so the district
+spread = sum of sector variances and ignores the positive within-district error correlation
+(~0.27); true district variance is larger. (The independent district model, which forecasts the
+district series directly, is well-calibrated at 0.85 -- ~1.6x wider SD.)
+
+**Fix (`scripts/calibrate_district_ci.py`):** learn a per-horizon multiplicative spread factor
+from the backtest district residuals (conformal-style: lambda_h = 0.80-quantile of the per-cell
+edge ratio, so the 80% interval covers 80%), and scale each district's samples around their mean.
+Validated leave-one-target-period-out (out-of-sample).
+
+| district forecast | log-CRPS | CRPS | cov@80% | cov@50% |
+|---|---|---|---|---|
+| bottom-up (uncalibrated) | 0.2070 | 553.3 | 0.68 | 0.39 |
+| **bottom-up + calibrated CI** | **0.2039** | **536.7** | **0.80** (CV 0.795) | **0.49** |
+| independent district model | 0.2111 | 523.3 | 0.85 | 0.58 |
+
+lambda = [1.25, 1.26, 1.37] (grows with horizon). Calibrating to nominal coverage **also improves
+log-CRPS and CRPS** (the under-dispersion was penalised by the proper scores), and the out-of-sample
+(LOPO-CV) coverage matches in-sample -> it generalises. The calibrated bottom-up is now the best
+district product: best log-CRPS, nominal coverage, coherent. Plot:
+`docs/figs/champion_eval_district_calibrated.html`. (Currently a post-processing step on the
+aggregated .nc; could be integrated into the aggregation/model pipeline.)
