@@ -1,0 +1,4 @@
+filename,model_name,model_version,crps_log1p,crps
+h12_percov_lags.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.5120377190338307,95.77649347507918
+h12_tgtlag3.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.5033151005150479,95.14337076849723
+h12_horizon.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.49803685632061084,96.76781444493948

@@ -1,25 +1,19 @@
-"""Pydantic config for one MSTL + multistep train/predict run.
+"""Pydantic config for one MSTL + ARIMA + RF-residual run.
 
 Same wrapper shape CHAP hands every external model: model knobs under
 ``user_option_values`` and the list of feature columns under
-``additional_continuous_covariates``. The RandomForest hyperparameters are
-reused from :mod:`simple_multistep_model` so the trend model is configured
-exactly as it is when run standalone.
+``additional_continuous_covariates``. Defaults are the published champion; a config
+typically only needs to name its covariate / IRS columns and (optionally) tune the lags.
 
 Example YAML::
 
-    additional_continuous_covariates: []          # pure self-forecasting trend
+    additional_continuous_covariates: [rainfall_era5, mean_temperature, relative_humidity]
     user_option_values:
-      target_variable: disease_cases
-      log_transform: true
-      season_length_monthly: 12
-      n_target_lags: 6
-      n_samples: 100
-      prob_wrapper: bootstrap
-      rf:
-        n_estimators: 200
-        max_depth: 10
-        min_samples_leaf: 5
+      irs_column: irs_allocated
+      irs_features: [level, since, cumulative, chem_channels, decay2, decay8]
+      irs_chemical_column: irs_insecticide_used
+      covariate_lags: {rainfall_era5: [1, 6], relative_humidity: [1, 4], mean_temperature: [1, 2]}
+      deseasonalize_covariates: [rainfall_era5, mean_temperature, relative_humidity]
 """
 
 from __future__ import annotations
@@ -29,195 +23,85 @@ from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
-from simple_multistep_model import RandomForestConfig
 
-ProbWrapper = Literal["bucketedresidual", "bootstrap", "cross-conformal"]
+
+class RandomForestConfig(BaseModel):
+    """sklearn RandomForestRegressor hyperparameters for the residual model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    n_estimators: int = 200
+    max_depth: int | None = None
+    min_samples_leaf: int = 3
+    max_features: str | int | float | None = "sqrt"
+    random_state: int | None = 42
 
 
 class RunConfig(BaseModel):
-    """All tunable knobs for one MSTL + multistep run."""
+    """Tunable knobs for one MSTL + ARIMA(fixed order) + RF-residual run.
+
+    The pipeline: MSTL deseasonalises ``log1p(target)``; a per-location ARIMA of a shared
+    fixed order forecasts the deseasonalised series (mean + spread); a pooled RandomForest
+    corrects the ARIMA residual using lagged climate anomalies, engineered IRS features and
+    lagged self-history; a location-scale variance head widens the spread by the forest's
+    own uncertainty. See docs/champion_model.pdf.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     target_variable: str = "disease_cases"
-
-    # MSTL decomposition
     log_transform: bool = True
+
+    # --- MSTL seasonal decomposition ---
     season_length_monthly: int = 12
     season_length_weekly: int = 52
 
-    # Trend model on the deseasonalized series
-    n_target_lags: int = 6
-    n_samples: int = 100
+    # --- features: lagged climate anomalies + self-history ---
     feature_min_lag: int = 1
     feature_max_lag: int = 3
-    # Per-covariate lag overrides: maps a covariate name to its own inclusive
-    # ``[min, max]`` lag window, overriding ``feature_min_lag``/``feature_max_lag``
-    # for that column only (others keep the global window). Lets e.g. rainfall
-    # carry a longer lag span than temperature. Names not present are ignored.
+    # Per-covariate lag overrides: ``{name: [min, max]}`` inclusive window for that column,
+    # overriding feature_min_lag/feature_max_lag (e.g. rainfall a longer span than temperature).
     covariate_lags: dict[str, list[int]] = Field(default_factory=dict)
-    use_location_dummies: bool = True
-    # How the pooled RF encodes location identity. The 406 sector one-hots are largely
-    # redundant (the per-location ARIMA already removes each sector's level) yet dominate the
-    # feature count, diluting max_features="sqrt" sampling of the informative covariates.
-    #   "sector"  -> one-hot per sector (406 cols; current behaviour, with use_location_dummies)
-    #   "none"    -> no location columns (ARIMA carries the level)
-    #   "district"-> one-hot the admin ``district`` column (46 cols)
-    #   "cluster" -> one-hot a ``cluster_id`` from KMeans on each sector's standardized seasonal
-    #                shape + mean level, fit on the training window only (leakage-safe), ``n_clusters`` cols
-    location_encoding: Literal["sector", "none", "district", "cluster"] = "sector"
-    n_clusters: int = 20
-    # Names of covariates to MSTL-deseasonalize before lagging, so the model sees
-    # their anomalies (matching the deseasonalized target) rather than the raw
-    # seasonal series. Covariates not listed are passed through raw — e.g. keep
-    # seasonal intervention indicators (sprayed_*) raw while deseasonalizing
-    # climate. Names not present in the data are ignored.
+    # Covariates to MSTL-deseasonalise before lagging, so the model sees their anomalies
+    # (matching the deseasonalised target) rather than the raw seasonal series.
     deseasonalize_covariates: list[str] = Field(default_factory=list)
+    # One-hot location identity for the pooled forest.
+    use_location_dummies: bool = True
+    # Lagged deseasonalised-target values fed to the RF (future lags bridged with the ARIMA mean).
+    rf_target_lags: int = 3
 
-    # How the deseasonalized series is forecast probabilistically:
-    #   "multistep"          -> recursive RF from simple_multistep_model + prob_wrapper
-    #   "arima_residual"     -> deterministic RF point + AutoARIMA on one-step OOB residuals
-    #   "recursive_residual" -> RF point with one-step OOB residuals resampled and
-    #                           compounded through the recursion (variance grows with horizon)
-    #   "rf_residual"        -> ARIMA base (mean + sigma) with RF modelling the ARIMA
-    #                           residual as a deterministic point correction (mirror of
-    #                           arima_residual)
-    prob_model: Literal[
-        "multistep", "arima_residual", "recursive_residual", "rf_residual"
-    ] = "multistep"
-
-    # multistep-only
-    prob_wrapper: ProbWrapper = "bootstrap"
-    min_bucket_size: int = 5
-
-    # arima_residual-only (AutoARIMA on the RF out-of-bag residuals)
-    arima_approximation: bool = False
-    arima_stepwise: bool = True
+    # --- ARIMA base (shared fixed order across all locations) ---
+    # All locations share this (p, d, q) order; only the coefficients are fit per series. The
+    # data's modal AutoARIMA order is [0, 1, 1] (= simple exponential smoothing); [0, 1, 2] is the
+    # tuned default. arima_level is the predictive-interval level used to back out the spread sigma.
+    arima_order: list[int] = Field(default_factory=lambda: [0, 1, 2])
     arima_level: int = 68
-    # Force a SHARED, fixed ARIMA order across all locations instead of per-location AutoARIMA
-    # order selection. None (default) = AutoARIMA picks (p,d,q) per series (current behaviour).
-    # A 3-element list ``[p, d, q]`` makes every location fit that fixed order (own coefficients
-    # still estimated per series) — removes order-selection noise and is much faster. The data's
-    # modal order is [0, 1, 1] (= simple exponential smoothing). arima_include_drift adds a drift
-    # (linear trend) term, only meaningful when d>=1.
-    arima_order: list[int] | None = None
-    arima_include_drift: bool = False
 
-    # IRS allocation feature extraction (rf_residual mode). When ``irs_column`` is
-    # set and ``irs_features`` is non-empty, dense protective-effect features are
-    # engineered from the raw (sparse) allocation column and added to the RF at
-    # lag 0 — see :mod:`mstl_multistep.irs_features`. ``irs_halflife`` controls the
-    # geometric decay (in months) of the ``decay`` feature.
+    # --- IRS (indoor residual spraying) feature extraction ---
+    # When irs_column is set and irs_features is non-empty, dense protective-effect features are
+    # engineered from the raw (sparse) allocation column. irs_halflife is the geometric decay (months)
+    # of the plain ``decay`` feature. irs_chemical_column (e.g. "irs_insecticide_used") enables the
+    # per-chemical decay channels in the feature bank. See mstl_multistep.irs_features.
     irs_column: str | None = None
     irs_features: list[str] = Field(default_factory=list)
     irs_halflife: float = 4.0
-    # When set to the insecticide column (e.g. "irs_insecticide_used"), the ``decay`` feature
-    # uses a *per-campaign, chemical-specific* decay half-life from the literature (carbamate ~2,
-    # pyrethroid ~3, organophosphate ~5, clothianidin/Fludora ~8 months; see
-    # :data:`mstl_multistep.irs_features.CHEM_HALFLIFE_MONTHS`) instead of the single
-    # ``irs_halflife`` for every campaign. None (default) = fixed half-life, champion unchanged.
     irs_chemical_column: str | None = None
 
-    # Number of lagged deseasonalized-target values fed to the rf_residual RF as
-    # extra features (0 = none, the default — ARIMA alone carries the AR dynamics).
-    # Future lags that fall in the forecast window are filled with the ARIMA mean
-    # forecast (non-recursive bridge), so the RF can pick up residual autocorrelation
-    # the linear ARIMA misses. Distinct from n_target_lags, which only the multistep
-    # mode's MultistepModel uses.
-    rf_target_lags: int = 0
-    # What the rf_target_lags feature lags: "deseason" = the deseasonalized log-target
-    # D (the series ARIMA forecasts; overlaps ARIMA's own AR terms), or "residual" =
-    # the ARIMA residual R = D - A (the autocorrelation ARIMA left behind; complementary
-    # rather than redundant). Future residual lags are bridged with 0 (ARIMA residual is
-    # mean-zero out of sample); deseason lags are bridged with the ARIMA mean forecast.
-    rf_target_lag_source: Literal["deseason", "residual"] = "deseason"
+    # --- location-scale variance head ---
+    # The RF correction is a point; "tree" widens the predictive spread by the forest's inter-tree
+    # variance (sigma_eff^2 = sigma_ARIMA^2 + scale * v(x)). "none" disables it.
+    residual_variance: Literal["none", "tree"] = "tree"
+    residual_variance_scale: float = 0.5
 
-    # Spatial neighbor features (rf_residual). When ``neighbor_group_col`` names a column
-    # (e.g. "district") and ``neighbor_target_lags`` > 0, add lagged leave-one-out
-    # group-mean-of-deseasonalized-target features ``nbr_lag1..k`` to the RF — a spatial
-    # autoregressive signal (the surrounding district's transmission anomaly), the spatial
-    # analogue of rf_target_lags. Forecast-window lags are bridged by holding the last
-    # observed neighbour mean (persistence). 0 = off (default), exactly reproducible.
-    neighbor_group_col: str | None = None
-    neighbor_target_lags: int = 0
-
-    # Fourier seasonal features (sin/cos of the annual cycle) added to the rf_residual
-    # RF at lag 0. 0 = none (default) — the model normally relies on MSTL to remove
-    # seasonality, but the seasonal-naive extrapolation can leave residual seasonal
-    # structure the RF could mop up. K adds 2K columns (sin_k, cos_k, k=1..K).
-    seasonal_fourier_order: int = 0
-
-    # Quantile-GBM residual (rf_residual). When True, replace the point-RF residual +
-    # symmetric Gaussian ARIMA spread with quantile gradient boosting on the ARIMA
-    # residual R at residual_quantile_levels: samples are drawn by inverse-CDF
-    # interpolation of the predicted residual quantiles (an asymmetric, skew-capable
-    # spread targeting the heavy right tail / outbreaks), added to the ARIMA mean.
-    # Horizon growth comes from scaling residual deviations by sigma_h/sigma_1.
-    residual_quantile: bool = False
-    residual_quantile_levels: list[float] = Field(
-        default_factory=lambda: [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95]
-    )
-
-    # Location-scale coordinate descent (rf_residual, non-quantile path). The model
-    # draws ARIMA's symmetric Gaussian spread and adds the RF correction as a point
-    # with no uncertainty -> the predictive variance ignores how (un)certain the
-    # correction is. When set, estimate a per-point variance v(x) of the correction
-    # and widen the predictive spread to sqrt(sigma_ARIMA^2 + residual_variance_scale * v(x)),
-    # so outbreak-prone / high-covariate-signal contexts get wider intervals.
-    #   "none"  -> current behaviour (exactly reproducible)
-    #   "tree"  -> RF inter-tree variance (epistemic uncertainty of the correction)
-    #   "model" -> a GBM regressing the squared OOB residuals on covariates
-    #              (aleatoric, heteroscedastic noise)
-    # residual_variance_iterations>1 turns it into IRLS coordinate descent: refit the
-    # mean RF weighted by 1/v, re-estimate v, repeat (1 = single pass, no reweighting).
-    residual_variance: Literal["none", "tree", "model"] = "none"
-    residual_variance_scale: float = 1.0
-    residual_variance_iterations: int = 1
-    # Horizon-growth of the variance head. v(x) (the correction's variance) is roughly
-    # flat across the forecast horizon, but ARIMA's sigma_h grows, so the head's relative
-    # contribution shrinks with horizon -- backwards, since the RF correction (trained on
-    # ~1-step residuals, applied h-step) becomes *less* reliable as the horizon grows. The
-    # per-step scale is multiplied by step**residual_variance_horizon_power (step=1..h), so
-    # 0.0 (default) reproduces the flat-scale behaviour exactly and >0 widens later steps more.
-    residual_variance_horizon_power: float = 0.0
-
-    # Per-horizon residual modelling (rf_residual). The default RF trains on ~1-step
-    # in-sample ARIMA residuals but is applied to h-step forecasts (ARIMA reverted to
-    # mean) -> under-corrects at long horizons. When True, generate multi-horizon
-    # training residuals (truth - ARIMA h-step forecast) at rf_horizon_origins rolling
-    # origins per location, for horizons 1..rf_horizon_max, and add horizon as an RF
-    # feature. Set rf_horizon_max to the forecast n-periods. Requires rf_target_lags=0,
-    # em_iterations=1.
-    rf_horizon_feature: bool = False
-    rf_horizon_max: int = 3
-    rf_horizon_origins: int = 6
-
-    # EM / backfitting iterations for rf_residual (1 = current single forward pass,
-    # exactly reproducible). When >1, alternately: remove the RF covariate effect
-    # from the signal, re-run MSTL+ARIMA on the cleaned series, then re-fit the RF
-    # on (signal - seasonal - ARIMA). ARIMA's sigma is naturally re-estimated on the
-    # covariate-cleaned residual. The RF covariate effect is formed out-of-bag during
-    # iterations so it does not corrupt the re-decomposition. em_damping in [0,1]
-    # blends new/old covariate estimates (1 = full update). Requires rf_target_lags=0.
-    em_iterations: int = 1
-    em_damping: float = 1.0
-    # Scale the ARIMA predictive sigma in the EM variant. Removing the covariate
-    # effect before ARIMA shrinks its sigma, but the RF effect is added back as a
-    # deterministic point — so the spread loses the covariate effect's prediction
-    # uncertainty and under-disperses. >1 re-inflates to recover calibration.
-    em_sigma_scale: float = 1.0
-
-    # Output post-processing
-    discretize_samples: bool = False
+    # --- output ---
+    n_samples: int = 100
     random_seed: int = 42
-
     rf: RandomForestConfig = Field(default_factory=RandomForestConfig)
 
     def lags_by_col(self) -> dict[str, tuple[int, int]]:
         """``covariate_lags`` normalized to ``{name: (min, max)}`` tuples.
 
-        Accepts either a 2-element ``[min, max]`` list or a single ``[lag]``
-        (treated as ``[lag, lag]``); raises on any other shape.
+        Accepts a 2-element ``[min, max]`` list or a single ``[lag]`` (treated as ``[lag, lag]``).
         """
         out: dict[str, tuple[int, int]] = {}
         for name, span in self.covariate_lags.items():
@@ -247,7 +131,7 @@ class ChapModelConfiguration(BaseModel):
 def load_model_configuration(path: str | Path) -> ChapModelConfiguration:
     """Load and validate a CHAP model-configuration YAML.
 
-    An empty ``{}`` mapping is fine and yields all defaults (no covariates).
+    An empty ``{}`` mapping is fine and yields all defaults (the champion, no covariates).
     """
     with Path(path).open("r") as f:
         return ChapModelConfiguration.model_validate(yaml.safe_load(f) or {})
