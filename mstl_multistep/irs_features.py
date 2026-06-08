@@ -31,10 +31,6 @@ import pandas as pd
 
 INDEX_COLS = ["time_period", "location"]
 
-# Fixed dataset column names for IRS inputs (declared as required_covariates in the MLproject).
-IRS_ALLOCATION_COLUMN = "irs_allocated"        # sparse 0-1 spray-coverage fraction
-IRS_CHEMICAL_COLUMN = "irs_insecticide_used"   # insecticide used (for per-chemical decay channels)
-
 IRS_FEATURE_NAMES = (
     "level", "decay", "since", "cumulative",
     # Direction-2 feature bank (let the RF pick by importance):

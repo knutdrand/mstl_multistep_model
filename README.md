@@ -105,12 +105,16 @@ additional_continuous_covariates: [rainfall_era5, mean_temperature, relative_hum
 user_option_values:
   covariate_lags: {rainfall_era5: [1, 6], relative_humidity: [1, 4], mean_temperature: [1, 2]}
   deseasonalize_covariates: [rainfall_era5, mean_temperature, relative_humidity]
+  irs_column: irs_allocated
+  irs_chemical_column: irs_insecticide_used
   irs_features: [level, since, cumulative, chem_channels, decay2, decay8, recent3, recent6, recent12, rounds12]
 ```
 
-The IRS inputs `irs_allocated` and `irs_insecticide_used` are declared as **`required_covariates`**
-in the `MLproject` (read from those fixed column names); climate covariates are supplied freely
-under `additional_continuous_covariates`.
+**IRS is optional.** Nothing is declared in the `MLproject` `required_covariates` — climate and the
+IRS campaign columns are all optional free covariates. IRS feature engineering is engaged only when
+`irs_column` (and `irs_features`) are set; omit them and the model runs on climate + self-history
+alone, so the same model serves datasets without spray data (e.g. Lao / Vietnam). See
+[`config_no_irs.yaml`](config_no_irs.yaml) for that variant.
 
 ### Option reference
 
@@ -126,8 +130,10 @@ under `additional_continuous_covariates`.
 | | `rf_target_lags` | 3 | lagged deseasonalised-target features |
 | ARIMA | `arima_order` | `[0, 1, 2]` | shared `(p,d,q)` order for all locations |
 | | `arima_level` | 68 | interval level used to back out σ |
-| IRS | `irs_features` | `[]` | which IRS features to engineer from the required IRS columns (see below) |
+| IRS | `irs_column` | `null` | sparse allocation column (0–1 coverage) |
+| | `irs_features` | `[]` | which IRS features to engineer (see below) |
 | | `irs_halflife` | 4.0 | decay half-life (months) for the plain `decay` |
+| | `irs_chemical_column` | `null` | insecticide column; enables per-chemical channels |
 | variance head | `residual_variance` | `tree` | `tree` widens spread by forest variance; `none` off |
 | | `residual_variance_scale` | 0.5 | weight of `v(x)` in `σ_eff²` |
 | output | `n_samples` | 100 | number of posterior samples |
@@ -135,9 +141,8 @@ under `additional_continuous_covariates`.
 | | `rf` | n_est 200, leaf 3, sqrt | RandomForest hyperparameters |
 
 ### IRS feature bank
-`irs_features` selects which dense features to engineer from the required IRS columns
-(`irs_allocated`, the sparse campaign column, and `irs_insecticide_used`); all contemporaneous,
-since spraying is known in advance:
+When `irs_column` is set, `irs_features` selects from these (engineered from the sparse campaign
+column; all dense and contemporaneous, since spraying is known in advance):
 
 - `level` — this month's allocation coverage; `since` — months since last campaign; `cumulative`
   — campaign-count stock.
@@ -145,7 +150,7 @@ since spraying is known in advance:
   half-lives 2 and 8 months.
 - `chem_channels` — **per-chemical decay channels** `decay_{carbamate, pyrethroid,
   organophosphate, clothianidin}`, each active only while that insecticide class is current
-  (from `irs_insecticide_used`), so the forest learns each chemical's effect magnitude. Literature
+  (needs `irs_chemical_column`), so the forest learns each chemical's effect magnitude. Literature
   half-lives: carbamate 2, pyrethroid 3, organophosphate 5, clothianidin 8 months.
 - `recent3/6/12` — sprayed within the last k months; `rounds12` — campaigns in the trailing year.
 

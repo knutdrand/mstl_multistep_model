@@ -1,0 +1,34 @@
+# No-IRS variant of the champion config: same model, IRS feature engineering disabled.
+# Use this on datasets without spray-campaign columns (e.g. the Lao / Vietnam admin1 data).
+# Simply omitting irs_column / irs_features turns IRS off; everything else is the champion.
+additional_continuous_covariates:
+  - rainfall_era5
+  - mean_temperature
+  - relative_humidity
+user_option_values:
+  target_variable: disease_cases
+  log_transform: true
+  season_length_monthly: 12
+  n_samples: 100
+  feature_min_lag: 1
+  feature_max_lag: 3
+  rf_target_lags: 3
+  covariate_lags:
+    rainfall_era5:     [1, 6]
+    relative_humidity: [1, 4]
+    mean_temperature:  [1, 2]
+  deseasonalize_covariates:
+    - rainfall_era5
+    - mean_temperature
+    - relative_humidity
+  # No irs_column / irs_features -> IRS feature engineering is skipped entirely.
+  arima_level: 68
+  arima_order: [0, 1, 2]
+  residual_variance: tree
+  residual_variance_scale: 0.5
+  rf:
+    n_estimators: 200
+    max_depth: null
+    min_samples_leaf: 3
+    max_features: sqrt
+    random_state: 42

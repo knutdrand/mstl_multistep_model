@@ -20,9 +20,11 @@ meta_data:
     Climate Health Analytics Platform. 2026. "MSTL + ARIMA + RF-residual Model".
     HISP Centre, University of Oslo.
 
-# IRS campaign inputs the model engineers features from. Climate covariates are supplied freely
-# via additional_continuous_covariates (allow_free... = true).
-required_covariates: [irs_allocated, irs_insecticide_used]
+# The model runs with or without covariates. Climate covariates and the IRS campaign columns are
+# all supplied freely via additional_continuous_covariates (allow_free... = true) and are optional;
+# IRS feature engineering is engaged by setting irs_column / irs_features below. Nothing is
+# strictly required, so required_covariates is empty.
+required_covariates: []
 allow_free_additional_continuous_covariates: true
 supported_period_type: any
 target: disease_cases
@@ -78,15 +80,23 @@ user_options:
     default: 68
     title: Predictive-interval level used to read the ARIMA sigma
     type: integer
+  irs_column:
+    default: null
+    title: Optional IRS allocation column (0-1 coverage); unset disables IRS feature engineering
+    type: ["string", "null"]
   irs_features:
     default: []
-    title: IRS features to engineer from irs_allocated / irs_insecticide_used
+    title: IRS features to engineer from the IRS columns (only used when irs_column is set)
     type: array
     items: {type: string}
   irs_halflife:
     default: 4.0
     title: Geometric decay half-life (months) for the plain IRS 'decay' feature
     type: number
+  irs_chemical_column:
+    default: null
+    title: Optional insecticide column; enables the per-chemical decay channels (chem_channels)
+    type: ["string", "null"]
   residual_variance:
     default: tree
     title: Location-scale variance head ('tree' widens spread by RF inter-tree variance; 'none' off)
