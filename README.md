@@ -154,6 +154,19 @@ column; all dense and contemporaneous, since spraying is known in advance):
   half-lives: carbamate 2, pyrethroid 3, organophosphate 5, clothianidin 8 months.
 - `recent3/6/12` — sprayed within the last k months; `rounds12` — campaigns in the trailing year.
 
+> **⚠️ chap deployment limitation — categorical intervention data.** chap's covariate model is
+> **float-only**: every declared covariate is coerced to `float` (`create_tsdataclass`,
+> `data.astype(float)`), and columns that aren't declared are dropped when chap assembles data from
+> its database. The IRS *chemical* column (`irs_insecticide_used`) is **categorical** (insecticide
+> product/class), so it fits neither path — it cannot be declared as a covariate and is dropped if
+> left undeclared. Consequently the **`chem_channels`** feature (and anything else needing the
+> insecticide identity) works only under local `chap eval`, where the full CSV is passed through; in
+> a real DB-backed chap deployment the categorical column is unavailable and those features silently
+> turn off. The numeric `irs_allocated` features (level/decay/since/cumulative/decay2/decay8/recent/
+> rounds) are unaffected. Tracked upstream in
+> [CLIM-770](https://dhis2.atlassian.net/browse/CLIM-770) (add `additional_categorical_covariates`
+> to the chap contract).
+
 ---
 
 ## Usage
