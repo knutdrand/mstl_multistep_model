@@ -1,180 +1,232 @@
 # mstl_multistep_model
 
-A CHAP-compatible external model that **MSTL-decomposes** each location's
-series and fits the recursive multistep model from
-[`simple_multistep_model`](../simple_multistep_model) as the **trend (+
-remainder) forecaster**. Seasonality is held fixed and extrapolated
-seasonal-naive, then added back before the forecast is returned.
+A CHAP-compatible probabilistic forecaster for monthly disease cases (e.g. malaria) at many
+locations. It combines a classical time-series base model with a machine-learning correction:
+
+> **MSTL** seasonal decomposition → a shared fixed-order **ARIMA** on the deseasonalised series →
+> a pooled **RandomForest** that corrects the ARIMA residual using lagged climate anomalies,
+> engineered indoor-residual-spraying (IRS) features and self-history → a **location-scale
+> variance head** that widens the predictive interval by the forest's own uncertainty.
+
+On the reference dataset (406 Rwanda sectors, monthly, 3-month horizon, 12 backtest splits) it
+reaches **log-CRPS 0.3123 / CRPS 81.88** — a ~4% log-CRPS improvement over a climate-only baseline.
+
+---
+
+## How it works
+
+The model works entirely in `log1p` space, `L = log(1 + cases)`, and writes that signal per
+location `ℓ` and month `t` as a sum of three estimated components plus noise:
 
 ```
-log1p(y) ──MSTL──▶ trend + remainder ──▶ MultistepModel (recursive RF) ──┐
-              │                                                          ├─▶ expm1 ─▶ samples
-              └──▶ seasonal ──seasonal-naive tile──────────────────────-─┘
+L(ℓ,t) = S(ℓ,t)          seasonal              (MSTL)
+       + A(ℓ,t)          AR / trend            (ARIMA)
+       + g(x(ℓ,t))       covariate correction  (RandomForest)
+       + ε
 ```
 
-The trend model is reused *verbatim* — same RandomForest regressor, same
-probabilistic wrapper (`bootstrap` / `cross-conformal` / `bucketedresidual`),
-same lag handling — it just forecasts the deseasonalized series instead of
-the raw target. Because MSTL self-estimates seasonality, the model needs **no
-future covariates** by default.
+Each component is fit by the estimator best suited to it. The forecast is Gaussian in `log1p`
+space and is mapped back to counts with `expm1`.
 
-## Why this shape
+### Step 1 — MSTL seasonal decomposition
+Each location's `log1p` series is decomposed by MSTL (annual period 12 for monthly data) into a
+**seasonal** component `S` and a **deseasonalised** remainder `D = L − S` (trend + remainder).
+`S` is extrapolated *seasonal-naive* into the forecast window; `D` is what the rest of the
+pipeline forecasts.
 
-The data is small, noisy and highly seasonal (see `CLAUDE.md`). MSTL pins the
-strong, stable seasonal cycle so the learned model only has to predict the
-comparatively smooth trend + remainder, which a recursive autoregressor with a
-few target lags handles well even on short series.
+### Step 2 — Shared fixed-order ARIMA base
+A separate ARIMA is fit per location to `D`, but **all locations share the same fixed order**
+(`arima_order`, default `[0, 1, 2]`) — only the coefficients are estimated per series. This
+replaced per-location order *selection*, which on short, noisy series is itself a source of
+noise; one robust order generalises better and was the single biggest accuracy improvement found.
+The data's modal auto-selected order is `[0, 1, 1]` — i.e. simple exponential smoothing.
+
+ARIMA plays two roles:
+- **Mean** — the h-step forecast `μ_h` carries persistence/trend; its in-sample one-step fit `Â`
+  defines the residual `R = D − Â` that the RandomForest learns.
+- **Spread** — the predictive interval (`arima_level`, default 68%) is converted to a Gaussian
+  standard deviation `σ_h` that grows with horizon. This is the model's main source of uncertainty.
+
+### Step 3 — RandomForest residual correction
+A single **pooled** RandomForest `g` is trained across all locations to predict the ARIMA
+residual `R` from a feature vector — a deterministic *point* correction that nudges the mean using
+structure the univariate ARIMA cannot see. The feature vector has four blocks:
+
+1. **Lagged climate anomalies** — each climate covariate is MSTL-deseasonalised first (so the
+   model sees anomalies), then lagged. Per-covariate lag windows reflect the physical delay from
+   weather to transmission (e.g. rainfall 1–6, humidity 1–4, temperature 1–2 months).
+2. **Engineered IRS features** — the sparse `irs_allocated` campaign column is turned into a dense
+   *feature bank* (see below).
+3. **Self-history** — the deseasonalised target `D` lagged `rf_target_lags` (default 3) months;
+   future lags are bridged with the ARIMA mean.
+4. **Location identity** — one-hot location dummies, so the pooled forest retains per-series level.
+
+### Step 4 — Location-scale variance head
+The RF correction is a point, so on its own it injects no uncertainty. The variance head restores
+that: the forest's **inter-tree variance** `v(x)` (how much its trees disagree) is folded into the
+spread,
+
+```
+σ_eff² = σ_ARIMA(h)² + residual_variance_scale · v(x)
+```
+
+(`residual_variance: tree`, `residual_variance_scale: 0.5`). This is the honest "total spread =
+forecast variance + variance of the correction", and it improves both log-CRPS and CRPS.
+
+### Step 5 — Reconstruction and sampling
+For each location and horizon step, `n_samples` (default 100) draws are taken from
+`N(S + μ_h + g(x), σ_eff²)`, mapped back to counts with `expm1`, and clipped at zero. Those
+samples are the probabilistic forecast, scored by log-CRPS (primary) and CRPS.
+
+A fuller write-up with figures and the SES / ARIMA(0,1,1) math is in `docs/champion_model.pdf`,
+`docs/arima_in_model.pdf` and `docs/arima011_math.pdf`.
+
+---
 
 ## Installation
 
-This project uses [uv](https://docs.astral.sh/uv/). The trend model
-`simple_multistep_model` is pulled directly from GitHub (pinned to a commit in
-`pyproject.toml`), so no sibling checkout is needed:
+Uses [uv](https://docs.astral.sh/uv/). No git dependencies:
 
 ```bash
 uv sync
 ```
 
+---
+
 ## Configuration
 
-Single wrapped YAML in the shape CHAP calls a *model configuration*:
+CHAP hands the model a YAML in the *model configuration* shape: the covariate columns under
+`additional_continuous_covariates` and model knobs under `user_option_values`. **All defaults are
+the published champion**, so a config typically only needs to name its covariate / IRS columns and
+(optionally) tune lags. `config.yaml` is the reference config:
 
 ```yaml
-additional_continuous_covariates: []       # [] = pure self-forecasting trend
+additional_continuous_covariates: [rainfall_era5, mean_temperature, relative_humidity]
 user_option_values:
-  target_variable: disease_cases
-  log_transform: true                       # decompose log1p(y), expm1 forecasts
-  season_length_monthly: 12
-  season_length_weekly: 52
-  n_target_lags: 6                          # deseasonalized-target lags
-  n_samples: 100
-  feature_min_lag: 1                        # only used if covariates are listed
-  feature_max_lag: 3
-  prob_wrapper: bootstrap                   # bootstrap | cross-conformal | bucketedresidual
-  min_bucket_size: 5                        # only for bucketedresidual
-  use_location_dummies: true                # keep per-series identity in the pooled model
-  deseasonalize_covariates:                 # covariate names to MSTL-deseasonalize
-    - rainfall                              # (others kept raw — e.g. list climate but
-    - mean_temperature                      #  not seasonal sprayed_* intervention flags)
-  discretize_samples: false
-  random_seed: 42
-  rf:
-    n_estimators: 200
-    max_depth: 10
-    min_samples_leaf: 5
-    max_features: sqrt
-    random_state: 42
+  covariate_lags: {rainfall_era5: [1, 6], relative_humidity: [1, 4], mean_temperature: [1, 2]}
+  deseasonalize_covariates: [rainfall_era5, mean_temperature, relative_humidity]
+  irs_column: irs_allocated
+  irs_chemical_column: irs_insecticide_used
+  irs_features: [level, since, cumulative, chem_channels, decay2, decay8, recent3, recent6, recent12, rounds12]
 ```
 
-Listing names under `additional_continuous_covariates` feeds those columns
-(lagged `feature_min_lag..feature_max_lag`) to the trend model. Calendar
-features are intentionally omitted — the target is already deseasonalized.
+### Option reference
 
-## Running with chap eval
+| group | option | default | meaning |
+|---|---|---|---|
+| data | `target_variable` | `disease_cases` | column to forecast |
+| | `log_transform` | `true` | model in `log1p` space |
+| | `season_length_monthly` / `_weekly` | 12 / 52 | MSTL seasonal period |
+| features | `feature_min_lag`, `feature_max_lag` | 1, 3 | global covariate lag window |
+| | `covariate_lags` | `{}` | per-covariate `{name: [min, max]}` override |
+| | `deseasonalize_covariates` | `[]` | covariates to MSTL-deseasonalise before lagging |
+| | `use_location_dummies` | `true` | one-hot location identity |
+| | `rf_target_lags` | 3 | lagged deseasonalised-target features |
+| ARIMA | `arima_order` | `[0, 1, 2]` | shared `(p,d,q)` order for all locations |
+| | `arima_level` | 68 | interval level used to back out σ |
+| IRS | `irs_column` | `null` | sparse allocation column (0–1 coverage) |
+| | `irs_features` | `[]` | which IRS features to engineer (see below) |
+| | `irs_halflife` | 4.0 | decay half-life (months) for the plain `decay` |
+| | `irs_chemical_column` | `null` | insecticide column; enables per-chemical channels |
+| variance head | `residual_variance` | `tree` | `tree` widens spread by forest variance; `none` off |
+| | `residual_variance_scale` | 0.5 | weight of `v(x)` in `σ_eff²` |
+| output | `n_samples` | 100 | number of posterior samples |
+| | `random_seed` | 42 | RNG seed |
+| | `rf` | n_est 200, leaf 3, sqrt | RandomForest hyperparameters |
+
+### IRS feature bank
+When `irs_column` is set, `irs_features` selects from these (engineered from the sparse campaign
+column; all dense and contemporaneous, since spraying is known in advance):
+
+- `level` — this month's allocation coverage; `since` — months since last campaign; `cumulative`
+  — campaign-count stock.
+- `decay` — geometric-decay protection (`irs_halflife`); `decay2`, `decay8` — a decay basis at
+  half-lives 2 and 8 months.
+- `chem_channels` — **per-chemical decay channels** `decay_{carbamate, pyrethroid,
+  organophosphate, clothianidin}`, each active only while that insecticide class is current
+  (needs `irs_chemical_column`), so the forest learns each chemical's effect magnitude. Literature
+  half-lives: carbamate 2, pyrethroid 3, organophosphate 5, clothianidin 8 months.
+- `recent3/6/12` — sprayed within the last k months; `rounds12` — campaigns in the trailing year.
+
+---
+
+## Usage
+
+The model is a CHAP external model. Evaluate it with `chap eval`:
 
 ```bash
 chap eval \
-  --model-name /Users/knutdr/Sources/mstl_multistep_model \
-  --dataset-csv /Users/knutdr/Data/CH/chap_LAO_admin1_monthly-3.csv \
-  --output-file output/lao.nc \
+  --model-name . \
+  --dataset-csv /path/to/data.csv \
   --model-configuration-yaml config.yaml \
   --backtest-params.n-periods 3 \
   --backtest-params.n-splits 12 \
   --backtest-params.stride 1 \
-  --run-config.track
+  --run-config.track          # records to MLflow
+
+# headline metrics (log-CRPS is primary)
+chap export-metrics --input-files output/eval.nc \
+  --metric-ids crps_log1p --metric-ids crps --output-file metrics.csv
 ```
 
-(`--run-config.track` records the run to MLflow — see the global CLAUDE.md.)
+Programmatic use:
 
-## Two probabilistic modes
+```python
+from mstl_multistep import build_chap_model, load_model_configuration
 
-`prob_model` selects how the deseasonalized series is forecast:
+mc = load_model_configuration("config.yaml")
+model = build_chap_model(mc.user_option_values, mc.additional_continuous_covariates)
+model.fit(historic_df)                            # time_period, location, target, covariates
+samples = model.predict(historic_df, future_df)   # wide frame of sample_0..sample_{n-1}
+```
 
-- `multistep` (default) — the recursive RF from `simple_multistep_model` with a
-  `prob_wrapper` (`bootstrap` / `cross-conformal` / `bucketedresidual`).
-- `rf_residual` — **AutoARIMA is the base** forecaster on the deseasonalized
-  series (mean + horizon-growing σ) and a **deterministic RF models the ARIMA
-  residual** using climate-anomaly features. ARIMA owns the spread, RF nudges
-  the mean. Same shape as chap_nixtla's `mstl_arima_residual` but with RF as the
-  residual learner. **Best mode — beats the classical baseline (see below).**
-- `arima_residual` — the inverse: a deterministic RF point forecast plus
-  **AutoARIMA on the RF out-of-bag residuals**. Fixes the bootstrap mode's
-  under-dispersion but stays just behind the baseline.
-- `recursive_residual` — deterministic RF point with one-step OOB residuals
-  resampled and compounded through the recursion. Fixes dispersion but scores
-  *worse* log-CRPS than the other residual modes; kept only for comparison.
+The input is a long panel with `time_period` (`YYYY-MM`), `location`, the target column, and any
+covariate / IRS columns named in the config.
 
-The recommended config (`config_rf_residual.yaml`) is `rf_residual` +
-deseasonalized climate covariates, RF `max_depth=null`.
+---
 
-## Benchmark — Lao admin1 monthly, 12 splits × h=3, tracked to MLflow
+## Interval calibration (optional)
 
-| Model | log-CRPS | CRPS | MAE | cov 10–90 |
-|---|---|---|---|---|
-| `multistep` (RF+bootstrap) | 0.924 | 76.5 | 79.2 | 0.066 |
-| `arima_residual`, no covariates | 0.766 | 60.7 | 76.4 | 0.484 |
-| `arima_residual` + raw climate | 0.727 | 56.0 | 71.1 | 0.493 |
-| `arima_residual` + deseasonalized climate (tuned) | 0.712 | 54.1 | 69.9 | 0.510 |
-| chap_nixtla `mstl_arima` (baseline) | 0.662 | 53.4 | 68.3 | 0.580 |
-| **`rf_residual` (ARIMA base + RF correction)** | **0.633** | **50.8** | **66.0** | 0.587 |
+Sector forecasts are well-calibrated on average, but two interval adjustments — learned from the
+backtest residuals (conformal: fit-on-backtest → apply) — are available in
+`mstl_multistep/calibration.py` and via `scripts/calibrate_forecast.py`:
 
-Story: `arima_residual` fixed the bootstrap mode's severe under-dispersion
-(coverage 0.066 → 0.484) and adding deseasonalized climate brought it level with
-the baseline (ablation: most of the climate gain is from adding it at all,
-0.766 → 0.727, deseasonalizing a smaller extra → 0.716; HPO ~0.004 more). But
-the decisive change was **swapping the roles** — making ARIMA the base and RF
-the residual corrector (`rf_residual`) — which beats the classical baseline on
-every metric.
-
-## Benchmark — VNM admin1 monthly (generalization check)
-
-| Model | log-CRPS | CRPS | MAE | cov 10–90 |
-|---|---|---|---|---|
-| `arima_residual` | 0.549 | 75.4 | 97.5 | 0.624 |
-| chap_nixtla `mstl_arima` (baseline) | 0.508 | 71.0 | 94.1 | 0.729 |
-| **`rf_residual`** | **0.498** | **70.0** | **93.5** | 0.725 |
-
-`rf_residual` beats the baseline on **both** datasets (Lao 0.633 vs 0.662, VNM
-0.498 vs 0.508), on log-CRPS, CRPS and MAE, with coverage matching. **ARIMA is
-the better base for these AR/seasonal series; RF adds the nonlinear
-climate-anomaly correction a univariate ARIMA can't — together they edge out
-classical MSTL+ARIMA.**
-
-## Benchmark — level-5 spray dataset (406 locations, with intervention covariates)
-
-`rf_residual` with climate (deseasonalized) + raw `sprayed_this_season` /
-`sprayed_last_season` (`config_spray.yaml`):
-
-| metric | value |
-|---|---|
-| log-CRPS | 0.326 |
-| CRPS / MAE | 83.3 / 113.1 |
-| coverage 10–90 / 25–75 | 0.757 / 0.477 (nominal 0.80 / 0.50) |
-
-Best-calibrated of the three datasets — the larger panel gives the ARIMA base
-more signal. The list-form `deseasonalize_covariates` keeps the seasonal
-`sprayed_*` intervention flags raw while deseasonalizing climate.
-
-Leaderboard vs every other model previously run on this dataset (MLflow,
-identical 12×3×1 backtest and dataset hash `2aa64188`):
-
-| Model | log-CRPS |
-|---|---|
-| **`rf_residual` (this model)** | **0.3258** |
-| `mstl_arima` | 0.3304 |
-| `mstl_arimax` | 0.3331 |
-| `mstl_nhits` | 0.3430 |
-| `mstl_arima_residual` | 0.3443 |
-| `joint_structural` (best) | 0.3649 |
-| `chtorch` (best) | 0.3918 |
-
-`rf_residual` has the best log-CRPS of all models tried here. (`chap_pymc` 0.378
-and `simple_multistep` 0.377 ran on a different dataset version, hash
-`ffe9ffaa`, so are excluded as not directly comparable.)
-
-## Running standalone
+- **per-sector** (`--level sector`) — fixes coverage heterogeneity across locations (log-space,
+  shrunk; per-location coverage std 0.12 → 0.05).
+- **per-district** (`--level district`) — undoes the under-dispersion of bottom-up aggregation
+  (district coverage 0.68 → 0.80, and also improves district log-CRPS).
 
 ```bash
-python train.py training_data.csv model.pkl --config config.yaml
-python predict.py model.pkl historic.csv future.csv predictions.csv --config config.yaml
+chap aggregate-eval output/eval.nc areas.geojson output/eval_district.nc
+uv run python scripts/calibrate_forecast.py output/eval_district.nc --level district \
+    --out output/eval_district_cal.nc
 ```
+
+---
+
+## Repository layout
+
+```
+config.yaml                   the published default config (= champion)
+mstl_multistep/
+  rf_residual.py              the model (ArimaBaseRFResidualModel: fit / predict)
+  decomposition.py            MSTL helpers
+  features.py                 lagged-covariate + location-dummy features
+  irs_features.py             the IRS feature bank
+  calibration.py              interval calibration (fit on backtest, apply to forecasts)
+  run_config.py               config schema (RunConfig)
+  pipeline.py                 build_chap_model entry point
+scripts/calibrate_forecast.py calibration CLI
+tests/                        test_pipeline.py (smoke) + test_golden.py (regression)
+docs/                         PDF write-ups of the model + the ARIMA math
+experiments/                  methodology notes + archived experiment configs/scripts
+```
+
+## Development
+
+```bash
+uv run pytest tests/          # smoke + golden regression
+```
+
+`tests/test_golden.py` pins the champion's forecast bit-for-bit — run it after any change to the
+model to confirm behaviour is preserved.
