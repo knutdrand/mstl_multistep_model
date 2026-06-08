@@ -5,6 +5,9 @@ Same wrapper shape CHAP hands every external model: model knobs under
 ``additional_continuous_covariates``. Defaults are the published champion; a config
 typically only needs to name its covariate / IRS columns and (optionally) tune the lags.
 
+The target is always modelled in ``log1p`` space, and every (non-IRS) covariate is
+MSTL-deseasonalised before lagging — these are not configurable.
+
 Example YAML::
 
     additional_continuous_covariates: [rainfall_era5, mean_temperature, relative_humidity]
@@ -13,7 +16,6 @@ Example YAML::
       irs_features: [level, since, cumulative, chem_channels, decay2, decay8]
       irs_chemical_column: irs_insecticide_used
       covariate_lags: {rainfall_era5: [1, 6], relative_humidity: [1, 4], mean_temperature: [1, 2]}
-      deseasonalize_covariates: [rainfall_era5, mean_temperature, relative_humidity]
 """
 
 from __future__ import annotations
@@ -50,7 +52,6 @@ class RunConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target_variable: str = "disease_cases"
-    log_transform: bool = True
 
     # --- MSTL seasonal decomposition ---
     season_length_monthly: int = 12
@@ -62,9 +63,8 @@ class RunConfig(BaseModel):
     # Per-covariate lag overrides: ``{name: [min, max]}`` inclusive window for that column,
     # overriding feature_min_lag/feature_max_lag (e.g. rainfall a longer span than temperature).
     covariate_lags: dict[str, list[int]] = Field(default_factory=dict)
-    # Covariates to MSTL-deseasonalise before lagging, so the model sees their anomalies
-    # (matching the deseasonalised target) rather than the raw seasonal series.
-    deseasonalize_covariates: list[str] = Field(default_factory=list)
+    # Every (non-IRS) covariate is always MSTL-deseasonalised before lagging, so the model sees
+    # its anomalies (matching the deseasonalised target) rather than the raw seasonal series.
     # One-hot location identity for the pooled forest.
     use_location_dummies: bool = True
     # Lagged deseasonalised-target values fed to the RF (future lags bridged with the ARIMA mean).

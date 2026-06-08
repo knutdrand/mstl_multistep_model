@@ -12,7 +12,6 @@ additional_continuous_covariates:
   - relative_humidity
 user_option_values:
   target_variable: disease_cases
-  log_transform: true
   season_length_monthly: 12
   n_samples: 100
   feature_min_lag: 1
@@ -22,10 +21,6 @@ user_option_values:
     rainfall_era5:     [1, 6]
     relative_humidity: [1, 4]
     mean_temperature:  [1, 2]
-  deseasonalize_covariates:
-    - rainfall_era5
-    - mean_temperature
-    - relative_humidity
   irs_column: irs_allocated
   irs_features: [level, since, cumulative, chem_channels, decay2, decay8, recent3, recent6, recent12, rounds12]
   irs_halflife: 4.0

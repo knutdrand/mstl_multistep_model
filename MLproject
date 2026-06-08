@@ -34,10 +34,6 @@ user_options:
     default: disease_cases
     title: Target column to forecast
     type: string
-  log_transform:
-    default: true
-    title: Decompose on log1p(target) and expm1 the forecasts
-    type: boolean
   season_length_monthly:
     default: 12
     title: MSTL season length for monthly data
@@ -58,11 +54,6 @@ user_options:
     default: {}
     title: Per-covariate lag window override, {name: [min, max]}
     type: object
-  deseasonalize_covariates:
-    default: []
-    title: Covariate names to MSTL-deseasonalize before lagging (e.g. climate yes, sprayed_* no)
-    type: array
-    items: {type: string}
   use_location_dummies:
     default: true
     title: Add one-hot location columns so the pooled model keeps per-series identity

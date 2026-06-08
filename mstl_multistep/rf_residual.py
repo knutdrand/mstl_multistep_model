@@ -7,7 +7,7 @@ deterministic point correction, exploiting nonlinear / climate-anomaly structure
 univariate ARIMA cannot. A location-scale variance head widens the spread by the
 forest's own (inter-tree) uncertainty.
 
-Reconstruction (log1p space when ``log_transform``)::
+Reconstruction (always in log1p space)::
 
     final = seasonal_naive + draws(mu_h, sigma_eff) + RF_residual_point
     sigma_eff^2 = sigma_ARIMA(h)^2 + residual_variance_scale * v(x)
@@ -38,6 +38,10 @@ class ArimaBaseRFResidualModel:
     def __init__(self, cfg: RunConfig, feature_columns: list[str]):
         self.cfg = cfg
         self.feature_columns = list(feature_columns)
+        # Every covariate is MSTL-deseasonalized before lagging, except the IRS columns
+        # (handled by the IRS feature bank, not the generic lag path).
+        irs_cols = {c for c in (cfg.irs_column, cfg.irs_chemical_column) if c}
+        self._deseason_cols = [c for c in self.feature_columns if c not in irs_cols]
         self._rf: RandomForestRegressor | None = None
         self._var_mode: str = "none"      # cached cfg.residual_variance for predict
         self._feat_cols: list[str] | None = None
@@ -106,12 +110,12 @@ class ArimaBaseRFResidualModel:
         target = cfg.target_variable
 
         deseason, _ = dec.decompose_panel(
-            historic_df, self._freq, target, self._season_lengths, cfg.log_transform
+            historic_df, self._freq, target, self._season_lengths
         )
         feats = build_model_features(
             historic_df, None, self.feature_columns, self._freq, self._season_lengths,
             cfg.feature_min_lag, cfg.feature_max_lag, cfg.use_location_dummies,
-            cfg.deseasonalize_covariates, cfg.lags_by_col(),
+            self._deseason_cols, cfg.lags_by_col(),
         )
         if cfg.irs_column and cfg.irs_features:
             irs, irs_cols = build_irs_features(
@@ -193,7 +197,7 @@ class ArimaBaseRFResidualModel:
         rng = np.random.default_rng(cfg.random_seed)
 
         deseason_hist, decomps = dec.decompose_panel(
-            historic_df, freq, target, self._season_lengths, cfg.log_transform
+            historic_df, freq, target, self._season_lengths
         )
         deseason_hist = deseason_hist.copy()
         deseason_hist["_ts"] = deseason_hist["time_period"].apply(
@@ -203,7 +207,7 @@ class ArimaBaseRFResidualModel:
         feats_all = build_model_features(
             historic_df, future_df, self.feature_columns, freq, self._season_lengths,
             cfg.feature_min_lag, cfg.feature_max_lag, cfg.use_location_dummies,
-            cfg.deseasonalize_covariates, cfg.lags_by_col(),
+            self._deseason_cols, cfg.lags_by_col(),
         )
         if cfg.irs_column and cfg.irs_features:
             irs, _ = build_irs_features(
@@ -265,8 +269,7 @@ class ArimaBaseRFResidualModel:
                 final = seasonal[:, None] + draws + rf_resid[:, None]  # (h, n)
             else:
                 final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
-            if cfg.log_transform:
-                final = np.expm1(final)
+            final = np.expm1(final)
             final = np.clip(final, a_min=0.0, a_max=None)
 
             for step in range(h):

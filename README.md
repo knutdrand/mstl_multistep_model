@@ -104,7 +104,6 @@ the published champion**, so a config typically only needs to name its covariate
 additional_continuous_covariates: [rainfall_era5, mean_temperature, relative_humidity]
 user_option_values:
   covariate_lags: {rainfall_era5: [1, 6], relative_humidity: [1, 4], mean_temperature: [1, 2]}
-  deseasonalize_covariates: [rainfall_era5, mean_temperature, relative_humidity]
   irs_column: irs_allocated
   irs_chemical_column: irs_insecticide_used
   irs_features: [level, since, cumulative, chem_channels, decay2, decay8, recent3, recent6, recent12, rounds12]
@@ -121,11 +120,9 @@ alone, so the same model serves datasets without spray data (e.g. Lao / Vietnam)
 | group | option | default | meaning |
 |---|---|---|---|
 | data | `target_variable` | `disease_cases` | column to forecast |
-| | `log_transform` | `true` | model in `log1p` space |
 | | `season_length_monthly` / `_weekly` | 12 / 52 | MSTL seasonal period |
 | features | `feature_min_lag`, `feature_max_lag` | 1, 3 | global covariate lag window |
 | | `covariate_lags` | `{}` | per-covariate `{name: [min, max]}` override |
-| | `deseasonalize_covariates` | `[]` | covariates to MSTL-deseasonalise before lagging |
 | | `use_location_dummies` | `true` | one-hot location identity |
 | | `rf_target_lags` | 3 | lagged deseasonalised-target features |
 | ARIMA | `arima_order` | `[0, 1, 2]` | shared `(p,d,q)` order for all locations |

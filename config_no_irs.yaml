@@ -7,7 +7,6 @@ additional_continuous_covariates:
   - relative_humidity
 user_option_values:
   target_variable: disease_cases
-  log_transform: true
   season_length_monthly: 12
   n_samples: 100
   feature_min_lag: 1
@@ -17,10 +16,6 @@ user_option_values:
     rainfall_era5:     [1, 6]
     relative_humidity: [1, 4]
     mean_temperature:  [1, 2]
-  deseasonalize_covariates:
-    - rainfall_era5
-    - mean_temperature
-    - relative_humidity
   # No irs_column / irs_features -> IRS feature engineering is skipped entirely.
   arima_level: 68
   arima_order: [0, 1, 2]

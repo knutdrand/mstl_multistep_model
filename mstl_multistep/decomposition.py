@@ -75,14 +75,13 @@ def decompose_panel(
     freq: str,
     target: str,
     season_lengths: list[int],
-    log_transform: bool,
 ):
     """MSTL-decompose every location's series.
 
     Returns ``(deseasonalized_df, {loc: decomp_frame})`` where
-    ``deseasonalized_df`` has the index columns plus the (de-seasonalized,
-    and log1p-transformed if requested) target column. Original NaNs in the
-    target are preserved in the deseasonalized output.
+    ``deseasonalized_df`` has the index columns plus the de-seasonalized,
+    log1p-transformed target column. Original NaNs in the target are preserved
+    in the deseasonalized output.
     """
     df = df.copy()
     df["_ts"] = df["time_period"].apply(lambda p: period_to_timestamp(p, freq))
@@ -92,7 +91,7 @@ def decompose_panel(
     for loc, g in df.groupby("location", sort=False):
         g = g.sort_values("_ts")
         y = pd.to_numeric(g[target], errors="coerce").to_numpy(dtype=float)
-        y_t = np.log1p(np.clip(y, a_min=0.0, a_max=None)) if log_transform else y
+        y_t = np.log1p(np.clip(y, a_min=0.0, a_max=None))
         decomp = decompose(y_t, season_lengths)
         decomps[str(loc)] = decomp
         sub = g[INDEX_COLS].copy()
