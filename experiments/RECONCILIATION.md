@@ -100,5 +100,21 @@ coverage is transform-invariant) -- doing it in count space fixes coverage but *
 Honest verdict (K=10): per-sector coverage heterogeneity collapses (std 0.123 -> 0.046,
 CV-validated), and out-of-sample log-CRPS is a small genuine improvement (0.3123 -> 0.3114) -- the
 in-sample 0.3066 is optimistic but the CV gain is positive, so calibrating each sector's spread in
-log space fixes coverage *and* nudges the proper score the right way. Post-processing step on the
-sector .nc (`output/arima012_bank_sector_cal.nc`); could be folded into the model's predict().
+log space fixes coverage *and* nudges the proper score the right way.
+
+## Integration: it must be backtest-fit -> apply (NOT inside predict())
+
+Attempted to fold the per-sector calibration into `predict()` by deriving lambda[loc] from the
+model's own in-sample out-of-bag one-step residuals (cheap, no nested backtest). **Biased and
+reverted:** the OOB one-step in-sample residual *understates* the true out-of-sample h-step
+forecast error (the same provenance issue as the RF residual), so the factors came out ~0.83
+(narrowing) and a subset backtest confirmed it pushes sector coverage **0.83 -> 0.76**, away from
+nominal. Honest interval calibration fundamentally needs out-of-sample residuals, which only exist
+in the backtest, not inside a single forecast.
+
+So calibration is integrated as the standard conformal pattern -- **fit the calibrator on the
+model's backtest, apply to its forecasts** -- packaged in `mstl_multistep/calibration.py`
+(`calibrate_sector_intervals` log-space per-location; `calibrate_district_intervals` per-horizon
+inflation) with one CLI `scripts/calibrate_forecast.py`. Pipeline:
+`chap eval -> [chap aggregate-eval] -> calibrate_forecast`. Champion (`config_arima012_bank`)
+unchanged; the model files were reverted to it.
