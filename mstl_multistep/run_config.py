@@ -1,17 +1,17 @@
 """Pydantic config for one MSTL + ARIMA + RF-residual run.
 
 Same wrapper shape CHAP hands every external model: model knobs under
-``user_option_values`` and the list of feature columns under
-``additional_continuous_covariates``. Defaults are the published champion; a config
-typically only needs to name its covariate / IRS columns and (optionally) tune the lags.
+``user_option_values`` and the (free) climate covariates under
+``additional_continuous_covariates``. The IRS inputs (``irs_allocated``,
+``irs_insecticide_used``) are declared as ``required_covariates`` in the MLproject and read
+from fixed column names. Defaults are the published champion; a config typically only needs to
+list its climate covariates and (optionally) tune the lags / IRS features.
 
 Example YAML::
 
     additional_continuous_covariates: [rainfall_era5, mean_temperature, relative_humidity]
     user_option_values:
-      irs_column: irs_allocated
       irs_features: [level, since, cumulative, chem_channels, decay2, decay8]
-      irs_chemical_column: irs_insecticide_used
       covariate_lags: {rainfall_era5: [1, 6], relative_humidity: [1, 4], mean_temperature: [1, 2]}
       deseasonalize_covariates: [rainfall_era5, mean_temperature, relative_humidity]
 """
@@ -78,14 +78,12 @@ class RunConfig(BaseModel):
     arima_level: int = 68
 
     # --- IRS (indoor residual spraying) feature extraction ---
-    # When irs_column is set and irs_features is non-empty, dense protective-effect features are
-    # engineered from the raw (sparse) allocation column. irs_halflife is the geometric decay (months)
-    # of the plain ``decay`` feature. irs_chemical_column (e.g. "irs_insecticide_used") enables the
-    # per-chemical decay channels in the feature bank. See mstl_multistep.irs_features.
-    irs_column: str | None = None
+    # When irs_features is non-empty, dense protective-effect features are engineered from the
+    # fixed input columns (``irs_allocated``, and ``irs_insecticide_used`` for the per-chemical
+    # decay channels) -- both declared as required_covariates in the MLproject. irs_halflife is the
+    # geometric decay (months) of the plain ``decay`` feature. See mstl_multistep.irs_features.
     irs_features: list[str] = Field(default_factory=list)
     irs_halflife: float = 4.0
-    irs_chemical_column: str | None = None
 
     # --- location-scale variance head ---
     # The RF correction is a point; "tree" widens the predictive spread by the forest's inter-tree

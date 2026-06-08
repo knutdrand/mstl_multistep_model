@@ -26,10 +26,8 @@ user_option_values:
     - rainfall_era5
     - mean_temperature
     - relative_humidity
-  irs_column: irs_allocated
   irs_features: [level, since, cumulative, chem_channels, decay2, decay8, recent3, recent6, recent12, rounds12]
   irs_halflife: 4.0
-  irs_chemical_column: irs_insecticide_used
   arima_level: 68
   arima_order: [0, 1, 2]
   residual_variance: tree

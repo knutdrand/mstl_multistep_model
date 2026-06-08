@@ -27,7 +27,11 @@ from statsforecast.models import ARIMA
 
 from mstl_multistep import decomposition as dec
 from mstl_multistep.features import INDEX_COLS, build_model_features
-from mstl_multistep.irs_features import build_irs_features
+from mstl_multistep.irs_features import (
+    IRS_ALLOCATION_COLUMN,
+    IRS_CHEMICAL_COLUMN,
+    build_irs_features,
+)
 from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
 from mstl_multistep.run_config import RunConfig
 
@@ -113,10 +117,10 @@ class ArimaBaseRFResidualModel:
             cfg.feature_min_lag, cfg.feature_max_lag, cfg.use_location_dummies,
             cfg.deseasonalize_covariates, cfg.lags_by_col(),
         )
-        if cfg.irs_column and cfg.irs_features:
+        if cfg.irs_features:
             irs, irs_cols = build_irs_features(
-                historic_df, None, cfg.irs_column, cfg.irs_features, cfg.irs_halflife,
-                chem_column=cfg.irs_chemical_column,
+                historic_df, None, IRS_ALLOCATION_COLUMN, cfg.irs_features, cfg.irs_halflife,
+                chem_column=IRS_CHEMICAL_COLUMN,
             )
             feats = feats.merge(irs, on=INDEX_COLS, how="left")
             for c in irs_cols:
@@ -205,10 +209,10 @@ class ArimaBaseRFResidualModel:
             cfg.feature_min_lag, cfg.feature_max_lag, cfg.use_location_dummies,
             cfg.deseasonalize_covariates, cfg.lags_by_col(),
         )
-        if cfg.irs_column and cfg.irs_features:
+        if cfg.irs_features:
             irs, _ = build_irs_features(
-                historic_df, future_df, cfg.irs_column, cfg.irs_features, cfg.irs_halflife,
-                chem_column=cfg.irs_chemical_column,
+                historic_df, future_df, IRS_ALLOCATION_COLUMN, cfg.irs_features, cfg.irs_halflife,
+                chem_column=IRS_CHEMICAL_COLUMN,
             )
             feats_all = feats_all.merge(irs, on=INDEX_COLS, how="left")
         feats_all = feats_all.reindex(columns=INDEX_COLS + self._cov_cols, fill_value=0.0)

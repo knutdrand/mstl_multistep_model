@@ -1,0 +1,3 @@
+filename,model_name,model_version,crps_log1p,crps
+arima012_bank.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.31231762372069544,81.87627100858114
+publish_check.nc,/Users/knutdr/Sources/mstl_multistep_model,unknown,0.31231762372069544,81.87627100858114

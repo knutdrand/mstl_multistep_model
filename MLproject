@@ -3,24 +3,27 @@ name: mstl_multistep_model
 meta_data:
   author: Knut Rand
   author_note: >
-    MSTL-decomposes each series in log1p space, then fits the recursive
-    multistep model from simple_multistep_model on the deseasonalized
-    (trend + remainder) series. Seasonality is extrapolated seasonal-naive
-    and added back before expm1. Self-forecasts seasonality and does not
-    depend on future covariates by default.
+    MSTL-decomposes each series in log1p space, fits a shared fixed-order ARIMA on the
+    deseasonalized (trend + remainder) series for the mean and spread, and a pooled
+    RandomForest that corrects the ARIMA residual using lagged climate anomalies, engineered
+    IRS (indoor-residual-spraying) features and lagged self-history. A location-scale variance
+    head widens the spread by the forest's own uncertainty. Seasonality is extrapolated
+    seasonal-naive and added back before expm1.
   author_assessed_status: yellow
   contact_email: knutdrand@gmail.com
   description: >
-    MSTL + simple recursive multistep trend model for CHAP. Designed for
-    small, noisy, highly-seasonal surveillance data.
-  display_name: MSTL + Multistep Trend
+    MSTL + fixed-order ARIMA + RandomForest-residual model for CHAP. Designed for small, noisy,
+    highly-seasonal surveillance data with optional climate covariates and IRS campaign data.
+  display_name: MSTL + ARIMA + RF residual
   organization: HISP Centre, University of Oslo
   citation_info: >
-    Climate Health Analytics Platform. 2026. "MSTL + Multistep Trend Model".
+    Climate Health Analytics Platform. 2026. "MSTL + ARIMA + RF-residual Model".
     HISP Centre, University of Oslo.
 
+# IRS campaign inputs the model engineers features from. Climate covariates are supplied freely
+# via additional_continuous_covariates (allow_free... = true).
+required_covariates: [irs_allocated, irs_insecticide_used]
 allow_free_additional_continuous_covariates: true
-required_covariates: []
 supported_period_type: any
 target: disease_cases
 
@@ -41,14 +44,6 @@ user_options:
     default: 52
     title: MSTL season length for weekly data
     type: integer
-  n_target_lags:
-    default: 6
-    title: Lagged deseasonalized-target values fed back as features
-    type: integer
-  n_samples:
-    default: 100
-    title: Number of probabilistic sample paths
-    type: integer
   feature_min_lag:
     default: 1
     title: Smallest covariate lag (periods)
@@ -57,45 +52,54 @@ user_options:
     default: 3
     title: Largest covariate lag (periods)
     type: integer
-  prob_model:
-    default: multistep
-    title: How the deseasonalized series is forecast probabilistically
-    type: string
-    enum: [multistep, arima_residual, recursive_residual, rf_residual]
-  prob_wrapper:
-    default: bootstrap
-    title: Probabilistic wrapper for the recursive multistep model
-    type: string
-    enum: [bootstrap, cross-conformal, bucketedresidual]
-  min_bucket_size:
-    default: 5
-    title: Min residual bucket size (only for bucketedresidual)
-    type: integer
-  arima_approximation:
-    default: false
-    title: AutoARIMA approximation (arima_residual only)
-    type: boolean
-  arima_stepwise:
-    default: true
-    title: AutoARIMA stepwise search (arima_residual only)
-    type: boolean
-  arima_level:
-    default: 68
-    title: Interval level used to read AutoARIMA sigma (arima_residual only)
-    type: integer
+  covariate_lags:
+    default: {}
+    title: Per-covariate lag window override, {name: [min, max]}
+    type: object
+  deseasonalize_covariates:
+    default: []
+    title: Covariate names to MSTL-deseasonalize before lagging (e.g. climate yes, sprayed_* no)
+    type: array
+    items: {type: string}
   use_location_dummies:
     default: true
     title: Add one-hot location columns so the pooled model keeps per-series identity
     type: boolean
-  deseasonalize_covariates:
+  rf_target_lags:
+    default: 3
+    title: Lagged deseasonalized-target values fed to the RF (future lags bridged with the ARIMA mean)
+    type: integer
+  arima_order:
+    default: [0, 1, 2]
+    title: Shared fixed ARIMA (p, d, q) order used for all locations
+    type: array
+    items: {type: integer}
+  arima_level:
+    default: 68
+    title: Predictive-interval level used to read the ARIMA sigma
+    type: integer
+  irs_features:
     default: []
-    title: Covariate names to MSTL-deseasonalize (others kept raw; e.g. climate yes, sprayed_* no)
+    title: IRS features to engineer from irs_allocated / irs_insecticide_used
     type: array
     items: {type: string}
-  discretize_samples:
-    default: false
-    title: Poisson-resample expected counts for count discreteness
-    type: boolean
+  irs_halflife:
+    default: 4.0
+    title: Geometric decay half-life (months) for the plain IRS 'decay' feature
+    type: number
+  residual_variance:
+    default: tree
+    title: Location-scale variance head ('tree' widens spread by RF inter-tree variance; 'none' off)
+    type: string
+    enum: [none, tree]
+  residual_variance_scale:
+    default: 0.5
+    title: Weight of the RF variance v(x) in sigma_eff^2 = sigma_ARIMA^2 + scale * v(x)
+    type: number
+  n_samples:
+    default: 100
+    title: Number of probabilistic sample paths
+    type: integer
   random_seed:
     default: 42
     title: Random seed for sampling
