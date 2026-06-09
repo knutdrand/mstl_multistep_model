@@ -72,6 +72,28 @@ def test_missing_location_history_is_finite():
     assert np.isfinite(preds.filter(like="sample_").to_numpy()).all()
 
 
+def test_treat_missing_as_zero_uses_dropped_rows():
+    """With the flag on, NaN target rows are kept (as 0) and feed the residual RF.
+
+    Default (flag off) drops them; turning it on changes the forecast, proving the
+    previously-missing weeks now contribute. Off-path stays untouched (no copy/fill).
+    """
+    df = _synthetic_panel(n_locations=2, n_months=84)
+    # Punch sparse holes in the target the way weekly surveillance data has them.
+    rng = np.random.default_rng(1)
+    hole = rng.random(len(df)) < 0.4
+    df.loc[hole, "disease_cases"] = np.nan
+    historic, future = _split(df)
+
+    off = build_chap_model(_cfg(), ["rainfall"]); off.fit(historic)
+    on = build_chap_model(_cfg(treat_missing_as_zero=True), ["rainfall"]); on.fit(historic)
+    p_off = off.predict(historic, future).filter(like="sample_").to_numpy()
+    p_on = on.predict(historic, future).filter(like="sample_").to_numpy()
+
+    assert np.isfinite(p_on).all() and (p_on >= 0).all()
+    assert not np.allclose(p_off.mean(), p_on.mean())  # filled zeros shift the forecast
+
+
 def test_build_model_features_deseasonalizes_only_listed_cols():
     """Listed covariate loses its seasonal cycle; an unlisted one keeps it."""
     from mstl_multistep.features import build_model_features

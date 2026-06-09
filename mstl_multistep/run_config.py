@@ -53,6 +53,13 @@ class RunConfig(BaseModel):
 
     target_variable: str = "disease_cases"
 
+    # When true, missing (NaN) target values are treated as 0 reported cases rather than
+    # genuinely-unknown rows that get dropped. Useful for sparse weekly surveillance data
+    # where an absent week means "no cases reported" (the data has no explicit zeros). With
+    # the gaps filled, every series spans its full length so MSTL can recover seasonality.
+    # Default False keeps the monthly champion bit-identical.
+    treat_missing_as_zero: bool = False
+
     # --- MSTL seasonal decomposition ---
     season_length_monthly: int = 12
     season_length_weekly: int = 52

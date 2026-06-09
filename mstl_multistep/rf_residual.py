@@ -60,6 +60,19 @@ class ArimaBaseRFResidualModel:
             out[f"tgt_lag{j}"] = g.groupby("location")[value_col].shift(j).to_numpy()
         return out
 
+    def _fill_missing_target(self, historic_df: pd.DataFrame) -> pd.DataFrame:
+        """Treat NaN target as 0 reported cases when ``cfg.treat_missing_as_zero`` is set.
+
+        Returns the frame unchanged (no copy) when the flag is off, so the default path —
+        and the monthly champion — is untouched.
+        """
+        if not self.cfg.treat_missing_as_zero:
+            return historic_df
+        target = self.cfg.target_variable
+        out = historic_df.copy()
+        out[target] = pd.to_numeric(out[target], errors="coerce").fillna(0.0)
+        return out
+
     def _season_lengths_for(self, freq: str) -> list[int]:
         sl = (
             self.cfg.season_length_weekly
@@ -106,6 +119,7 @@ class ArimaBaseRFResidualModel:
     def fit(self, historic_df: pd.DataFrame) -> "ArimaBaseRFResidualModel":
         cfg = self.cfg
         self._freq = detect_frequency(historic_df)
+        historic_df = self._fill_missing_target(historic_df)
         self._season_lengths = self._season_lengths_for(self._freq)
         target = cfg.target_variable
 
@@ -195,6 +209,7 @@ class ArimaBaseRFResidualModel:
         freq = self._freq
         target = cfg.target_variable
         rng = np.random.default_rng(cfg.random_seed)
+        historic_df = self._fill_missing_target(historic_df)
 
         deseason_hist, decomps = dec.decompose_panel(
             historic_df, freq, target, self._season_lengths

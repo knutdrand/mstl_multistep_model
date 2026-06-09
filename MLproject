@@ -34,6 +34,10 @@ user_options:
     default: disease_cases
     title: Target column to forecast
     type: string
+  treat_missing_as_zero:
+    default: false
+    title: Treat missing (NaN) target values as 0 reported cases instead of dropping them
+    type: boolean
   season_length_monthly:
     default: 12
     title: MSTL season length for monthly data
@@ -52,7 +56,7 @@ user_options:
     type: integer
   covariate_lags:
     default: {}
-    title: Per-covariate lag window override, {name: [min, max]}
+    title: "Per-covariate lag window override, {name: [min, max]}"
     type: object
   use_location_dummies:
     default: true

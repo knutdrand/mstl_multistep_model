@@ -1,0 +1,23 @@
+# Weekly CHAP data (e.g. laos_weekly_four_years.csv: location, time_period=YYYY-Wnn,
+# disease_cases, mean_temperature, rainfall). The model auto-detects weekly frequency and
+# uses season_length_weekly=52 for the MSTL decomposition.
+#
+# treat_missing_as_zero is the key knob for weekly surveillance data: an absent week means
+# "no cases reported" (these datasets have no explicit zeros), so the NaNs are filled with 0.
+# Without it nearly every series is too sparse to span two 52-week seasons and MSTL falls back
+# to all-trend, losing the seasonality. No IRS columns in this dataset, so IRS is left off.
+additional_continuous_covariates:
+  - mean_temperature
+  - rainfall
+user_option_values:
+  target_variable: disease_cases
+  treat_missing_as_zero: true
+  season_length_weekly: 52
+  n_samples: 100
+  feature_min_lag: 1
+  feature_max_lag: 3
+  rf_target_lags: 3
+  arima_level: 68
+  arima_order: [0, 1, 2]
+  residual_variance: tree
+  residual_variance_scale: 0.5
