@@ -129,7 +129,7 @@ class RunConfig(BaseModel):
 class ChapModelConfiguration(BaseModel):
     """Wrapper YAML that ``chap eval``/``chap forecast`` hands to the model."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     additional_continuous_covariates: list[str] = Field(default_factory=list)
     user_option_values: RunConfig = Field(default_factory=RunConfig)
