@@ -51,6 +51,11 @@ class RunConfig(BaseModel):
     n_samples: int = 100
     feature_min_lag: int = 1
     feature_max_lag: int = 3
+    # Per-covariate lag overrides: maps a covariate name to its own inclusive
+    # ``[min, max]`` lag window, overriding ``feature_min_lag``/``feature_max_lag``
+    # for that column only (others keep the global window). Lets e.g. rainfall
+    # carry a longer lag span than temperature. Names not present are ignored.
+    covariate_lags: dict[str, list[int]] = Field(default_factory=dict)
     use_location_dummies: bool = True
     # Names of covariates to MSTL-deseasonalize before lagging, so the model sees
     # their anomalies (matching the deseasonalized target) rather than the raw
@@ -89,11 +94,40 @@ class RunConfig(BaseModel):
     irs_features: list[str] = Field(default_factory=list)
     irs_halflife: float = 4.0
 
+    # Number of lagged deseasonalized-target values fed to the rf_residual RF as
+    # extra features (0 = none, the default — ARIMA alone carries the AR dynamics).
+    # Future lags that fall in the forecast window are filled with the ARIMA mean
+    # forecast (non-recursive bridge), so the RF can pick up residual autocorrelation
+    # the linear ARIMA misses. Distinct from n_target_lags, which only the multistep
+    # mode's MultistepModel uses.
+    rf_target_lags: int = 0
+
     # Output post-processing
     discretize_samples: bool = False
     random_seed: int = 42
 
     rf: RandomForestConfig = Field(default_factory=RandomForestConfig)
+
+    def lags_by_col(self) -> dict[str, tuple[int, int]]:
+        """``covariate_lags`` normalized to ``{name: (min, max)}`` tuples.
+
+        Accepts either a 2-element ``[min, max]`` list or a single ``[lag]``
+        (treated as ``[lag, lag]``); raises on any other shape.
+        """
+        out: dict[str, tuple[int, int]] = {}
+        for name, span in self.covariate_lags.items():
+            if len(span) == 1:
+                lo = hi = int(span[0])
+            elif len(span) == 2:
+                lo, hi = int(span[0]), int(span[1])
+            else:
+                raise ValueError(
+                    f"covariate_lags[{name!r}] must be [min, max] or [lag], got {span!r}"
+                )
+            if lo > hi:
+                raise ValueError(f"covariate_lags[{name!r}] has min > max: {span!r}")
+            out[name] = (lo, hi)
+        return out
 
 
 class ChapModelConfiguration(BaseModel):

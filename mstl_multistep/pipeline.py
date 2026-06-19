@@ -138,6 +138,7 @@ class MSTLMultistepModel:
             cfg.feature_max_lag,
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
+            cfg.lags_by_col(),
         )
 
         one_step, bucket = _build_one_step(cfg)
@@ -170,6 +171,7 @@ class MSTLMultistepModel:
             cfg.feature_max_lag,
             cfg.use_location_dummies,
             cfg.deseasonalize_covariates,
+            cfg.lags_by_col(),
         )
 
         y_xr = target_to_xarray(deseason_hist, target, ffill=True)
