@@ -69,9 +69,9 @@ def main():
     mask = ~(np.isnan(X).any(axis=1) | np.isnan(y))
     X, y = X[mask], y[mask]
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.25, random_state=0)
-    rf = RandomForestRegressor(n_estimators=cfg.rf.n_estimators, max_depth=cfg.rf.max_depth,
-                               min_samples_leaf=cfg.rf.min_samples_leaf,
-                               max_features=cfg.rf.max_features, random_state=42, n_jobs=-1)
+    rf = RandomForestRegressor(n_estimators=cfg.rf_n_estimators, max_depth=cfg.rf_max_depth,
+                               min_samples_leaf=cfg.rf_min_samples_leaf,
+                               max_features=cfg.rf_max_features, random_state=cfg.rf_random_state, n_jobs=-1)
     rf.fit(Xtr, ytr)
     print(f"locations={df.location.nunique()} design_rows={len(y)} features={len(feat_cols)} "
           f"test_R2={rf.score(Xte, yte):.4f}")

@@ -112,13 +112,11 @@ def build_configs():
             feature_min_lag=1,
             feature_max_lag=3,
             arima_level=68,
-            rf={
-                "n_estimators": 200,
-                "max_depth": d["rf_max_depth"],
-                "min_samples_leaf": d["rf_min_samples_leaf"],
-                "max_features": "sqrt",
-                "random_state": 42,
-            },
+            rf_n_estimators=200,
+            rf_max_depth=d["rf_max_depth"],
+            rf_min_samples_leaf=d["rf_min_samples_leaf"],
+            rf_max_features="sqrt",
+            rf_random_state=42,
         )
         label = (
             f"{d['prob_model'][:5]} lags={d['n_target_lags']} "

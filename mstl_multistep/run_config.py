@@ -27,18 +27,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class RandomForestConfig(BaseModel):
-    """sklearn RandomForestRegressor hyperparameters for the residual model."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    n_estimators: int = 200
-    max_depth: int | None = None
-    min_samples_leaf: int = 3
-    max_features: str | int | float | None = "sqrt"
-    random_state: int | None = 42
-
-
 class RunConfig(BaseModel):
     """Tunable knobs for one MSTL + ARIMA(fixed order) + RF-residual run.
 
@@ -100,10 +88,16 @@ class RunConfig(BaseModel):
     residual_variance: Literal["none", "tree"] = "tree"
     residual_variance_scale: float = 0.5
 
+    # --- RandomForest residual model ---
+    rf_n_estimators: int = 200
+    rf_max_depth: int | None = None
+    rf_min_samples_leaf: int = 3
+    rf_max_features: str | int | float | None = "sqrt"
+    rf_random_state: int | None = 42
+
     # --- output ---
     n_samples: int = 100
     random_seed: int = 42
-    rf: RandomForestConfig = Field(default_factory=RandomForestConfig)
 
     def lags_by_col(self) -> dict[str, tuple[int, int]]:
         """``covariate_lags`` normalized to ``{name: (min, max)}`` tuples.

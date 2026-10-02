@@ -30,7 +30,7 @@ def _split(df, horizon=3):
 
 
 def _cfg(**kw):
-    base = dict(n_samples=20, rf={"n_estimators": 30, "random_state": 0})
+    base = dict(n_samples=20, rf_n_estimators=30, rf_random_state=0)
     base.update(kw)
     return RunConfig(**base)
 

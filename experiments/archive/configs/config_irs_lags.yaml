@@ -27,9 +27,8 @@ user_option_values:
   arima_stepwise: true
   arima_approximation: true
   arima_level: 68
-  rf:
-    n_estimators: 200
-    max_depth: null
-    min_samples_leaf: 3
-    max_features: sqrt
-    random_state: 42
+  rf_n_estimators: 200
+  rf_max_depth: null
+  rf_min_samples_leaf: 3
+  rf_max_features: sqrt
+  rf_random_state: 42

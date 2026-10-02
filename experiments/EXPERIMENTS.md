@@ -20,8 +20,8 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
 | 4 | exp/irs-feat-subset @ce16893 | config | IRS subset `[level, decay]` only | 0.3239 | 83.5 | 113.4 | 0.759 / 0.480 | regressed — since+cumulative carry ~half the gain |
 | 5 | exp/arima-sigma-scale @57148f4 | code | arima_sigma_scale = 1.10 (widen intervals) | 0.3227 | 83.8 | 113.5 | **0.800** / 0.519 | regressed on log-CRPS though coverage hit nominal — model already near CRPS-optimal dispersion |
 | 6 | exp/add-vegetation @afb9040 | config | + ndvi, evi (deseasonalized) covariates | 0.3221 | 83.9 | 113.9 | 0.761 / 0.481 | flat on log-CRPS, **worse** crps/mae — veg adds point noise |
-| 7 | exp/rf-leaf3 @f29393c | config | RF min_samples_leaf 5 → 3 (on exp2) | **0.3221** | **83.2** | **113.0** | 0.762 / 0.482 | **best** — log-CRPS tied w/ exp2 but crps/mae better, no regression |
-| 8 | exp/rf-leaf2 @77f1f41 | config | RF min_samples_leaf 3 → 2 (on exp7) | 0.3225 | 82.9 | 112.5 | 0.761 / 0.481 | regressed on log-CRPS — leaf<3 overfits log-scale tails; crps/mae keep dropping |
+| 7 | exp/rf-leaf3 @f29393c | config | rf_min_samples_leaf 5 → 3 (on exp2) | **0.3221** | **83.2** | **113.0** | 0.762 / 0.482 | **best** — log-CRPS tied w/ exp2 but crps/mae better, no regression |
+| 8 | exp/rf-leaf2 @77f1f41 | config | rf_min_samples_leaf 3 → 2 (on exp7) | 0.3225 | 82.9 | 112.5 | 0.761 / 0.481 | regressed on log-CRPS — leaf<3 overfits log-scale tails; crps/mae keep dropping |
 | 9 | exp/per-covariate-lags @9d49cd6 | **code** | per-covariate lags: rainfall [1,6], humidity [1,4], temp [1,2] (on exp7) | **0.3217** | 83.8 | 113.7 | 0.764 / 0.482 | **CHAMPION** ✅ best log-CRPS (−1.1% vs baseline); crps/mae regress ~0.6% (log-scale vs raw-scale trade-off, accepted) |
 | 10 | config_tgtlag3_var | **code** | location-scale variance head on champion+target-lags: σ²_total = σ²_ARIMA + 0.5·tree_var (RF correction uncertainty propagated; the honest-uncertainty step the mean-EM lacked, see EM_ANGLES.md) | **0.3200** | **82.88** | — | — | **CHAMPION** ✅ improves BOTH metrics (−0.10% / −0.11% vs config_tgtlag3 0.3203/82.97) — rare non-trade-off; fixes mild h=3 under-dispersion. Gain several× larger at h=12 (subset). |
 | 11 | config_nbr (nbr1) | **code** | spatial neighbor feature: lagged leave-one-out district-mean of deseasonalized target (nbr_lags=1) on config_tgtlag3_var (see SPATIAL_NEIGHBOR.md) | 0.32007 | 82.90 | — | — | **negative** — subset suggested −0.0011 but did NOT replicate on full harness (marginally worse both). Spatial signal already captured (deseasonalized climate + per-loc AR; spray is district-uniform). neighbor-IRS skipped: redundant by construction (corr 0.988). Code inert (default off). |
@@ -41,14 +41,14 @@ fraction, sparse ~2.5% of rows, ~8-month allocation runs in 188/406 locations) i
   The naive config raw-lag path (exp 1) did **not** — the sparse column is ~all zeros
   inside a 1–3 month lag window.
 - **Champion = exp 9** (`exp/per-covariate-lags`, tag `best/per-covariate-lags`): IRS
-  features + `min_samples_leaf=3` + per-covariate lags (rainfall [1,6], humidity [1,4],
+  features + `rf_min_samples_leaf=3` + per-covariate lags (rainfall [1,6], humidity [1,4],
   temp [1,2]). **log-CRPS 0.3217 — best of the session, −1.1% vs baseline.** Trades ~0.6%
   on crps/mae (longer moisture lags help log-scale small-count calibration at a small cost
   to raw-count accuracy); accepted since log-CRPS is the primary metric. The intermediate
   exp 7 (`exp/rf-leaf3`) remains the best *balanced* config (0.3221, best crps/mae).
 - **Negative results:** decay half-life is insensitive (3); the full 4-feature IRS set
   beats a subset (4); global sigma inflation fixes coverage but hurts log-CRPS (5);
-  vegetation indices add point-forecast noise (6); `min_samples_leaf<3` overfits the
+  vegetation indices add point-forecast noise (6); `rf_min_samples_leaf<3` overfits the
   log-scale tails (8).
 
 ## Reproduce the champion
@@ -129,7 +129,7 @@ per-horizon + target-lags combination remains an untested long-horizon idea.
 
 ## Main-harness champion (h=3, reaffirmed)
 
-**`config_tgtlag3` (IRS features + per-covariate lags + min_samples_leaf=3 + rf_target_lags=3):
+**`config_tgtlag3` (IRS features + per-covariate lags + rf_min_samples_leaf=3 + rf_target_lags=3):
 log-CRPS 0.3203, CRPS 82.97.** All further h=3 improvements measured against this.
 
 ## Target-lag source: ARIMA residual R vs deseasonalized target D (h=3)

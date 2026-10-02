@@ -135,7 +135,11 @@ alone, so the same model serves datasets without spray data (e.g. Lao / Vietnam)
 | | `residual_variance_scale` | 0.5 | weight of `v(x)` in `σ_eff²` |
 | output | `n_samples` | 100 | number of posterior samples |
 | | `random_seed` | 42 | RNG seed |
-| | `rf` | n_est 200, leaf 3, sqrt | RandomForest hyperparameters |
+| RandomForest | `rf_n_estimators` | 200 | number of trees in the residual forest |
+| | `rf_max_depth` | `null` | maximum tree depth; unlimited when null |
+| | `rf_min_samples_leaf` | 3 | minimum samples in each leaf |
+| | `rf_max_features` | `sqrt` | features considered at each split |
+| | `rf_random_state` | 42 | RandomForest random seed |
 
 ### IRS feature bank
 When `irs_column` is set, `irs_features` selects from these (engineered from the sparse campaign
