@@ -187,11 +187,11 @@ class ArimaBaseRFResidualModel:
         cfg = self.cfg
         self._var_mode = cfg.residual_variance
         rf = RandomForestRegressor(
-            n_estimators=cfg.rf.n_estimators,
-            max_depth=cfg.rf.max_depth,
-            min_samples_leaf=cfg.rf.min_samples_leaf,
-            max_features=cfg.rf.max_features,
-            random_state=cfg.rf.random_state,
+            n_estimators=cfg.rf_n_estimators,
+            max_depth=cfg.rf_max_depth,
+            min_samples_leaf=cfg.rf_min_samples_leaf,
+            max_features=cfg.rf_max_features,
+            random_state=cfg.rf_random_state,
             n_jobs=-1,
             oob_score=(self._var_mode != "none"),
         )

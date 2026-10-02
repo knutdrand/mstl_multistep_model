@@ -40,9 +40,13 @@ class Instrumented(ArimaBaseRFResidualModel):
         hi = absR >= np.quantile(absR, 0.90)   # top-decile |R| = the big residuals/outbreaks
         for it in range(iters):
             rf = RandomForestRegressor(
-                n_estimators=cfg.rf.n_estimators, max_depth=cfg.rf.max_depth,
-                min_samples_leaf=cfg.rf.min_samples_leaf, max_features=cfg.rf.max_features,
-                random_state=cfg.rf.random_state, n_jobs=-1, oob_score=(mode != "none"),
+                n_estimators=cfg.rf_n_estimators,
+                max_depth=cfg.rf_max_depth,
+                min_samples_leaf=cfg.rf_min_samples_leaf,
+                max_features=cfg.rf_max_features,
+                random_state=cfg.rf_random_state,
+                n_jobs=-1,
+                oob_score=(mode != "none"),
             )
             rf.fit(Xm, ym, sample_weight=weight)
             self._rf = rf
@@ -67,7 +71,7 @@ class Instrumented(ArimaBaseRFResidualModel):
             prev_pred = pred
             if mode == "model":
                 vm = HistGradientBoostingRegressor(loss="squared_error", max_iter=200,
-                                                   learning_rate=0.05, random_state=cfg.rf.random_state)
+                                                   learning_rate=0.05, random_state=cfg.rf_random_state)
                 m = ok & np.isfinite(e2)
                 vm.fit(Xm[m], np.log(e2[m] + 1e-6)); self._varmodel = vm
                 vtrain = np.exp(vm.predict(Xm))

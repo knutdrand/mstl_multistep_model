@@ -109,6 +109,26 @@ user_options:
     default: 42
     title: Random seed for sampling
     type: integer
+  rf_n_estimators:
+    default: 200
+    title: Number of trees in the RandomForest residual model
+    type: integer
+  rf_max_depth:
+    default: null
+    title: Maximum tree depth in the RandomForest residual model
+    type: ["integer", "null"]
+  rf_min_samples_leaf:
+    default: 3
+    title: Minimum samples per leaf in the RandomForest residual model
+    type: integer
+  rf_max_features:
+    default: sqrt
+    title: Number or strategy of features considered at each RandomForest split
+    type: ["string", "integer", "number", "null"]
+  rf_random_state:
+    default: 42
+    title: Random seed for the RandomForest residual model
+    type: ["integer", "null"]
 
 uv_env: pyproject.toml
 
