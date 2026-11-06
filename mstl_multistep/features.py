@@ -8,6 +8,7 @@ by the model.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from mstl_multistep.io_utils import period_to_timestamp
@@ -43,8 +44,12 @@ def lag_covariates(
 
 
 def one_hot_locations(df: pd.DataFrame) -> pd.DataFrame:
-    """Append one-hot ``loc_*`` columns (sorted, so fit/predict columns align)."""
-    dummies = pd.get_dummies(df["location"], prefix="loc").astype(float)
+    """Append one-hot ``loc_*`` columns (sorted, so fit/predict columns align).
+
+    Stored as ``uint8``: the table has (locations x periods) rows and one column per
+    location, so 64-bit floats grow quadratically with the number of locations.
+    """
+    dummies = pd.get_dummies(df["location"], prefix="loc", dtype=np.uint8)
     dummies = dummies.reindex(sorted(dummies.columns), axis=1)
     return pd.concat([df, dummies], axis=1)
 
