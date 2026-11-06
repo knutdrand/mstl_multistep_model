@@ -232,25 +232,22 @@ class ArimaBaseRFResidualModel:
         future = future_df.copy()
         future["_ts"] = periods_to_timestamps(future["time_period"], freq)
 
-        rows = []
+        # Group the panels once instead of scanning the full frames for every location.
+        hist_by_loc = dict(list(deseason_hist.groupby(deseason_hist["location"].astype(str), sort=False)))
+        feats_by_loc = dict(list(feats_all.groupby(feats_all["location"].astype(str), sort=False)))
+
+        # Pass 1, per location: ARIMA forecast, seasonal extrapolation and RF feature rows.
+        per_loc = []
         for loc, fg in future.groupby("location", sort=False):
             loc_str = str(loc)
             fg = fg.sort_values("_ts")
-            times = fg["time_period"].astype(str).tolist()
             h = len(fg)
 
-            y_hist = (
-                deseason_hist[deseason_hist["location"].astype(str) == loc_str]
-                .sort_values("_ts")[target]
-                .to_numpy(dtype=float)
-            )
+            y_hist = hist_by_loc[loc_str].sort_values("_ts")[target].to_numpy(dtype=float)
             _, mean_h, sigma_h = self._arima(y_hist, h=h, want_fitted=False)
-            arima_draws = rng.normal(
-                loc=mean_h[:, None], scale=sigma_h[:, None], size=(h, cfg.n_samples)
-            )
 
             fut_feat = (
-                feats_all[feats_all["location"].astype(str) == loc_str]
+                feats_by_loc[loc_str]
                 .sort_values("_ts")
                 .tail(h)[self._cov_cols]
                 .to_numpy(dtype=float)
@@ -267,12 +264,26 @@ class ArimaBaseRFResidualModel:
                         tl[t, ji] = s[idx] if idx >= 0 else np.nan
                 fut_feat = np.hstack([fut_feat, tl])
             seasonal = dec.extrapolate_seasonal(decomps[loc_str], self._season_lengths, h)
-            Xf = np.nan_to_num(fut_feat)
+            per_loc.append((loc_str, fg["time_period"].astype(str).tolist(), mean_h, sigma_h,
+                            seasonal, np.nan_to_num(fut_feat)))
 
-            rf_resid = self._rf.predict(Xf)  # (h,)
+        # Pass 2: one RF call (and one tree-variance pass) on the stacked rows of all locations.
+        X_all = np.vstack([item[5] for item in per_loc])
+        rf_resid_all = self._rf.predict(X_all)
+        v_all = self._residual_variance(X_all) if self._var_mode != "none" else None
+
+        # Pass 3, per location in the original order, so the RNG stream is unchanged.
+        finals, out_times, out_locs = [], [], []
+        offset = 0
+        for loc_str, times, mean_h, sigma_h, seasonal, _ in per_loc:
+            h = len(times)
+            rf_resid = rf_resid_all[offset:offset + h]
+            arima_draws = rng.normal(
+                loc=mean_h[:, None], scale=sigma_h[:, None], size=(h, cfg.n_samples)
+            )
             if self._var_mode != "none":
                 # Honest predictive variance: ARIMA spread + variance of the RF correction.
-                v = self._residual_variance(Xf)  # (h,)
+                v = v_all[offset:offset + h]
                 sigma_eff = np.sqrt(sigma_h ** 2 + cfg.residual_variance_scale * v)
                 draws = rng.normal(
                     loc=mean_h[:, None], scale=sigma_eff[:, None], size=(h, cfg.n_samples)
@@ -280,15 +291,14 @@ class ArimaBaseRFResidualModel:
                 final = seasonal[:, None] + draws + rf_resid[:, None]  # (h, n)
             else:
                 final = seasonal[:, None] + arima_draws + rf_resid[:, None]  # (h, n)
-            final = np.expm1(final)
-            final = np.clip(final, a_min=0.0, a_max=None)
-
-            for step in range(h):
-                row = {"time_period": times[step], "location": loc_str}
-                for i, v in enumerate(final[step]):
-                    row[f"sample_{i}"] = float(v)
-                rows.append(row)
+            finals.append(np.clip(np.expm1(final), a_min=0.0, a_max=None))
+            out_times.extend(times)
+            out_locs.extend([loc_str] * h)
+            offset += h
 
         sample_cols = [f"sample_{i}" for i in range(cfg.n_samples)]
-        return pd.DataFrame(rows)[INDEX_COLS + sample_cols]
+        out = pd.DataFrame(np.vstack(finals), columns=sample_cols)
+        out.insert(0, "location", out_locs)
+        out.insert(0, "time_period", out_times)
+        return out[INDEX_COLS + sample_cols]
 
