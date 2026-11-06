@@ -156,18 +156,32 @@ class ArimaBaseRFResidualModel:
         resid_df = pd.concat(resid_blocks, ignore_index=True)
 
         # Lagged deseasonalized target fed to the RF (future lags bridged with the ARIMA mean).
+        # Merges run on the narrow key frame (left merges keep feats' row order), so the
+        # wide feature table with one dummy column per location is never copied.
+        narrow = feats[INDEX_COLS]
         self._tgt_cols = []
         if cfg.rf_target_lags > 0:
             tl = self._target_lag_frame(deseason, target, cfg.rf_target_lags)
-            feats = feats.merge(tl, on=INDEX_COLS, how="left")
+            narrow = narrow.merge(tl, on=INDEX_COLS, how="left")
             self._tgt_cols = [f"tgt_lag{j}" for j in range(1, cfg.rf_target_lags + 1)]
+        narrow = narrow.merge(resid_df, on=INDEX_COLS, how="left")
+        if len(narrow) != len(feats):
+            raise ValueError("duplicate (time_period, location) rows in the training data")
         self._feat_cols = self._cov_cols + self._tgt_cols
 
-        design = feats.merge(resid_df, on=INDEX_COLS, how="left")
-        X = design[self._feat_cols].to_numpy(dtype=float)
-        yres = design["_resid"].to_numpy(dtype=float)
-        mask = ~(np.isnan(X).any(axis=1) | np.isnan(yres))
-        self._fit_mean_and_variance(X[mask], yres[mask])
+        # Row mask from the columns that can hold NaN (integer dummy columns cannot),
+        # applied before the one conversion to float32 -- the dtype the RF uses internally.
+        yres = narrow["_resid"].to_numpy(dtype=float)
+        nan_cols = [c for c in self._cov_cols if feats[c].dtype.kind not in "iub"]
+        mask = ~(feats[nan_cols].isna().any(axis=1).to_numpy()
+                 | narrow[self._tgt_cols].isna().any(axis=1).to_numpy()
+                 | np.isnan(yres))
+        X = np.empty((int(mask.sum()), len(self._feat_cols)), dtype=np.float32)
+        for i, c in enumerate(self._cov_cols):
+            X[:, i] = feats[c].to_numpy()[mask]
+        for i, c in enumerate(self._tgt_cols, start=len(self._cov_cols)):
+            X[:, i] = narrow[c].to_numpy()[mask]
+        self._fit_mean_and_variance(X, yres[mask])
         return self
 
     @staticmethod
@@ -226,6 +240,10 @@ class ArimaBaseRFResidualModel:
                 chem_column=cfg.irs_chemical_column,
             )
             feats_all = feats_all.merge(irs, on=INDEX_COLS, how="left")
+        # Only the future rows are fed to the RF; drop the history before widening.
+        fut_keys = pd.MultiIndex.from_frame(future_df[INDEX_COLS].astype(str))
+        is_future = pd.MultiIndex.from_frame(feats_all[INDEX_COLS].astype(str)).isin(fut_keys)
+        feats_all = feats_all[is_future]
         feats_all = feats_all.reindex(columns=INDEX_COLS + self._cov_cols, fill_value=0.0)
         feats_all["_ts"] = periods_to_timestamps(feats_all["time_period"], freq)
 
