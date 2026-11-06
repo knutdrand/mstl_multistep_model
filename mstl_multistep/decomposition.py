@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from statsforecast.mstl import mstl
 
-from mstl_multistep.io_utils import period_to_timestamp
+from mstl_multistep.io_utils import periods_to_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def decompose_panel(
     in the deseasonalized output.
     """
     df = df.copy()
-    df["_ts"] = df["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+    df["_ts"] = periods_to_timestamps(df["time_period"], freq)
 
     blocks: list[pd.DataFrame] = []
     decomps: dict[str, pd.DataFrame] = {}
@@ -120,11 +120,11 @@ def deseasonalize_covariates(
     cols = [c for c in covariate_cols if c in historic_df.columns]
 
     hist = historic_df.copy()
-    hist["_ts"] = hist["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+    hist["_ts"] = periods_to_timestamps(hist["time_period"], freq)
     fut = None
     if future_df is not None and len(future_df):
         fut = future_df.copy()
-        fut["_ts"] = fut["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+        fut["_ts"] = periods_to_timestamps(fut["time_period"], freq)
 
     blocks: list[pd.DataFrame] = []
     for loc, hg in hist.groupby("location", sort=False):

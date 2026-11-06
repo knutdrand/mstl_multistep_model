@@ -35,3 +35,14 @@ def period_to_timestamp(period: str, freq: str) -> pd.Timestamp:
         year, week = s.lower().split("-w")
         return pd.to_datetime(f"{year}-W{int(week):02d}-1", format="%G-W%V-%u")
     return pd.to_datetime(s)
+
+
+def periods_to_timestamps(periods: pd.Series, freq: str) -> pd.Series:
+    """Vectorised :func:`period_to_timestamp`: parse each distinct period once, then map.
+
+    Panels repeat the same few hundred periods across every location, so this is
+    far cheaper than ``periods.apply(period_to_timestamp)`` row by row.
+    """
+    as_str = periods.astype(str)
+    lookup = {p: period_to_timestamp(p, freq) for p in pd.unique(as_str)}
+    return as_str.map(lookup)
