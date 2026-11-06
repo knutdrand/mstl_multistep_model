@@ -28,7 +28,7 @@ from statsforecast.models import ARIMA
 from mstl_multistep import decomposition as dec
 from mstl_multistep.features import INDEX_COLS, build_model_features
 from mstl_multistep.irs_features import build_irs_features
-from mstl_multistep.io_utils import detect_frequency, period_to_timestamp
+from mstl_multistep.io_utils import detect_frequency, periods_to_timestamps
 from mstl_multistep.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class ArimaBaseRFResidualModel:
     def _target_lag_frame(self, frame: pd.DataFrame, value_col: str, k: int) -> pd.DataFrame:
         """``[*INDEX_COLS, tgt_lag1..tgt_lagk]`` of ``value_col`` (D or ARIMA residual), per location."""
         g = frame.copy()
-        g["_ts"] = g["time_period"].apply(lambda p: period_to_timestamp(p, self._freq))
+        g["_ts"] = periods_to_timestamps(g["time_period"], self._freq)
         g = g.sort_values(["location", "_ts"])
         out = g[INDEX_COLS].copy()
         for j in range(1, k + 1):
@@ -142,9 +142,7 @@ class ArimaBaseRFResidualModel:
         self._cov_cols = [c for c in feats.columns if c not in INDEX_COLS]
 
         deseason = deseason.copy()
-        deseason["_ts"] = deseason["time_period"].apply(
-            lambda p: period_to_timestamp(p, self._freq)
-        )
+        deseason["_ts"] = periods_to_timestamps(deseason["time_period"], self._freq)
 
         # ARIMA residual = deseason - ARIMA in-sample fitted, per location.
         resid_blocks = []
@@ -215,9 +213,7 @@ class ArimaBaseRFResidualModel:
             historic_df, freq, target, self._season_lengths
         )
         deseason_hist = deseason_hist.copy()
-        deseason_hist["_ts"] = deseason_hist["time_period"].apply(
-            lambda p: period_to_timestamp(p, freq)
-        )
+        deseason_hist["_ts"] = periods_to_timestamps(deseason_hist["time_period"], freq)
 
         feats_all = build_model_features(
             historic_df, future_df, self.feature_columns, freq, self._season_lengths,
@@ -231,10 +227,10 @@ class ArimaBaseRFResidualModel:
             )
             feats_all = feats_all.merge(irs, on=INDEX_COLS, how="left")
         feats_all = feats_all.reindex(columns=INDEX_COLS + self._cov_cols, fill_value=0.0)
-        feats_all["_ts"] = feats_all["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+        feats_all["_ts"] = periods_to_timestamps(feats_all["time_period"], freq)
 
         future = future_df.copy()
-        future["_ts"] = future["time_period"].apply(lambda p: period_to_timestamp(p, freq))
+        future["_ts"] = periods_to_timestamps(future["time_period"], freq)
 
         rows = []
         for loc, fg in future.groupby("location", sort=False):
